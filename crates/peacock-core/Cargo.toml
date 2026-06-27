@@ -1,0 +1,29 @@
+[package]
+name = "peacock-core"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+peacock-types = { workspace = true }
+escurel-client = { workspace = true }
+escurel-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+secrecy = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+peacock-test-support = { path = "../peacock-test-support" }
+escurel-test-support = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }

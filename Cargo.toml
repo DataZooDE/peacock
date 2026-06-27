@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/peacock-types",
+    "crates/peacock-core",
+    "crates/peacock-server",
+    "crates/peacock-bin",
+    "crates/peacock-test-support",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.91"
+version = "0.1.0"
+license = "BUSL-1.1"
+authors = ["DataZoo GmbH <hello@data-zoo.de>"]
+repository = "https://github.com/DataZooDE/peacock"
+homepage = "https://github.com/DataZooDE/peacock"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.dependencies]
+# Internal crates
+peacock-types = { path = "crates/peacock-types" }
+peacock-core = { path = "crates/peacock-core" }
+peacock-server = { path = "crates/peacock-server" }
+
+# Shared third-party (versions aligned with escurel/triton workspaces)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "net", "time", "io-util"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }
+clap = { version = "4", features = ["derive", "env"] }
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+async-trait = "0.1"
+secrecy = "0.10"
+tempfile = "3"
+
+# Cross-repo path dependencies (see CLAUDE.md "Cross-repo dependencies").
+# escurel's `query_instance` lives on the `feature/query-instance` worktree
+# until it merges to escurel `main`; repoint these then.
+escurel-client = { path = "../escurel-query-instance/crates/escurel-client" }
+escurel-types = { path = "../escurel-query-instance/crates/escurel-types" }
+escurel-test-support = { path = "../escurel-query-instance/crates/escurel-test-support" }
+triton-tests = { path = "../triton/crates/triton-tests" }
