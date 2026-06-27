@@ -25,11 +25,19 @@ async fn main() {
     let nw = NorthwindEscurel::spawn().await;
     eprintln!("peacock-demo: escurel up at {}", nw.endpoint());
 
+    // Serve the built Flutter-web client at /app when the bundle exists.
+    let flutter_dir = {
+        let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../web/peacock-web/build/web");
+        d.is_dir().then_some(d)
+    };
+
     let state = Arc::new(AppState {
         escurel: EscurelData::new(nw.endpoint()),
         principal: nw.sales_principal(),
         png_scale: 2.0,
         demo_html: DEMO_HTML,
+        flutter_dir,
     });
 
     let port: u16 = std::env::var("PEACOCK_DEMO_PORT")

@@ -25,11 +25,14 @@ pub struct AppState {
     pub png_scale: f32,
     /// The embedded demo SPA (served at `/`).
     pub demo_html: &'static str,
+    /// Optional built Flutter-web bundle directory, served at `/app` (the
+    /// richer client surface, FR-M-1). `None` skips it.
+    pub flutter_dir: Option<std::path::PathBuf>,
 }
 
 /// Build the peacock HTTP router.
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+    let mut app = Router::new()
         .route("/healthz", get(healthz))
         .route("/version", get(version))
         .route("/v1/render_report", post(render_report))
@@ -37,8 +40,14 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/mcp", post(crate::mcp::handle))
         // Triton upstream contract (GET / serves the demo SPA; POST / is the
         // header-routed Triton dispatch).
-        .route("/", get(index).post(crate::upstream::handle))
-        .with_state(state)
+        .route("/", get(index).post(crate::upstream::handle));
+
+    // The Flutter-web client, when a built bundle is provided.
+    if let Some(dir) = &state.flutter_dir {
+        app = app.nest_service("/app", tower_http::services::ServeDir::new(dir));
+    }
+
+    app.with_state(state)
 }
 
 /// Bind `addr` and serve until the process exits.

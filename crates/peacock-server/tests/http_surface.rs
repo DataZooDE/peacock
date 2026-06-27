@@ -15,6 +15,7 @@ async fn start() -> (NorthwindEscurel, String) {
         principal: nw.sales_principal(),
         png_scale: 2.0,
         demo_html: "<!doctype html><title>peacock demo</title>",
+        flutter_dir: None,
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -1,0 +1,74 @@
+# peacock CI.
+#
+# Bootstrap stance (mirrors escurel): the pull_request/push triggers are
+# commented out while we iterate fast against sibling repos with local gates
+# (cargo fmt/clippy/test/build). Re-enable them before declaring v1 stable.
+#
+# peacock path-depends on its siblings escurel and triton, so CI checks them
+# out next to peacock and builds the triton binary the consumer tests spawn.
+name: ci
+
+on:
+  workflow_dispatch:
+  # pull_request:
+  # push:
+  #   branches: [main]
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout peacock
+        uses: actions/checkout@v4
+        with:
+          path: peacock
+
+      - name: Checkout escurel (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/escurel
+          path: escurel
+          token: ${{ secrets.DATAZOO_CI_TOKEN }}
+
+      - name: Checkout triton (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/triton
+          path: triton
+          token: ${{ secrets.DATAZOO_CI_TOKEN }}
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: peacock
+
+      # The consumer integration tests spawn the real triton binary.
+      - name: Build triton binary
+        working-directory: triton
+        run: cargo build --bin triton
+
+      - name: fmt
+        working-directory: peacock
+        run: cargo fmt --check
+
+      - name: clippy
+        working-directory: peacock
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        working-directory: peacock
+        run: cargo test --workspace
+
+      - name: build (release, linux/x86_64 is release-blocking)
+        working-directory: peacock
+        run: cargo build --workspace --release
+
+      # The standalone Flutter-web bundle is built and its SHA pinned into
+      # /version; the Rust binary embeds it.
+      # - name: Flutter web bundle
+      #   run: cd peacock/web/peacock-web && flutter build web --release
