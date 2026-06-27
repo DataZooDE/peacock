@@ -48,6 +48,32 @@ async fn renders_the_northwind_report_as_one_artifact() {
 }
 
 #[tokio::test]
+async fn renders_a_real_png_for_the_chat_surface() {
+    // FR-C-2 / FR-V-2: with png_scale set, the artifact carries a real PNG of
+    // the Northwind chart (pure-Rust rasterizer, no Node/Deno/network).
+    let nw = NorthwindEscurel::spawn().await;
+    let escurel = EscurelData::new(nw.endpoint());
+    let opts = peacock_core::RenderOpts {
+        png_scale: Some(2.0),
+        ..Default::default()
+    };
+    let art = render(
+        NW_REPORT,
+        &json!({}),
+        &nw.sales_principal(),
+        &escurel,
+        &opts,
+    )
+    .await
+    .expect("render with png");
+    let png = art.png.expect("artifact has a PNG");
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    assert!(png.len() > 1000);
+
+    nw.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_drill_is_a_fresh_render_with_absolute_params() {
     // FR-M-3 / FR-X-2 parity at the core: a drill = the same render with new
     // absolute params; a committed drill yields the compact view-state record.

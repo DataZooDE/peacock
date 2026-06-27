@@ -17,12 +17,17 @@ use crate::skill::ReportSkills;
 pub struct RenderOpts {
     /// Per-view row cap (NFR-P-3).
     pub max_rows: usize,
+    /// Rasterize the first chart to PNG and attach it to the artifact
+    /// (the chat surface / embedded preview path, FR-C-2/FR-E-2). `None`
+    /// skips rasterization; `Some(scale)` renders at `scale` ≥ 1.0.
+    pub png_scale: Option<f32>,
 }
 
 impl Default for RenderOpts {
     fn default() -> Self {
         Self {
             max_rows: DEFAULT_MAX_ROWS,
+            png_scale: None,
         }
     }
 }
@@ -62,7 +67,23 @@ where
     }
 
     // 4. Compose the one artifact (FR-R-3).
-    compose(&skill, &absolute, &rows, opts.max_rows)
+    let mut artifact = compose(&skill, &absolute, &rows, opts.max_rows)?;
+
+    // 5. Optionally rasterize the first chart to PNG (chat / embedded preview).
+    if let Some(scale) = opts.png_scale
+        && let Some(spec) = artifact.vega_specs.first()
+    {
+        let png = peacock_rasterizer::render_vega_to_png(spec, scale)?;
+        artifact.png = Some(png);
+    }
+
+    Ok(artifact)
+}
+
+/// Rasterize a single Vega-Lite chart spec to PNG — the `render_a2ui_to_png`
+/// capability Triton's chat surface delegates to (FR-V-2, FR-C-2).
+pub fn render_a2ui_to_png(spec: &serde_json::Value, scale: f32) -> Result<Vec<u8>> {
+    Ok(peacock_rasterizer::render_vega_to_png(spec, scale)?)
 }
 
 /// Build the compact view-state record pushed to the model on a committed

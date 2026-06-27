@@ -14,5 +14,5 @@ pub mod render;
 pub mod skill;
 
 pub use data::{Column, EscurelData, ReportData, RowSet};
-pub use render::{RenderOpts, render, view_state_record};
+pub use render::{RenderOpts, render, render_a2ui_to_png, view_state_record};
 pub use skill::{Agg, ReportSkill, ReportSkills, ViewSpec};

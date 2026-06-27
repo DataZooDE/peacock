@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/peacock-types",
     "crates/peacock-core",
+    "crates/peacock-rasterizer",
     "crates/peacock-server",
     "crates/peacock-bin",
     "crates/peacock-test-support",
@@ -25,6 +26,7 @@ unused_must_use = "deny"
 # Internal crates
 peacock-types = { path = "crates/peacock-types" }
 peacock-core = { path = "crates/peacock-core" }
+peacock-rasterizer = { path = "crates/peacock-rasterizer" }
 peacock-server = { path = "crates/peacock-server" }
 
 # Shared third-party (versions aligned with escurel/triton workspaces)
@@ -40,11 +42,16 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 async-trait = "0.1"
 secrecy = "0.10"
 tempfile = "3"
+# Pure-Rust SVG → PNG (no Node, no network, NFR-S-5). peacock renders its
+# guardrail-restricted Vega-Lite subset to SVG itself, then rasterizes here.
+resvg = "0.47"
+usvg = "0.47"
+tiny-skia = "0.12"
 
 # Cross-repo path dependencies (see CLAUDE.md "Cross-repo dependencies").
-# escurel's `query_instance` lives on the `feature/query-instance` worktree
-# until it merges to escurel `main`; repoint these then.
-escurel-client = { path = "../escurel-query-instance/crates/escurel-client" }
-escurel-types = { path = "../escurel-query-instance/crates/escurel-types" }
-escurel-test-support = { path = "../escurel-query-instance/crates/escurel-test-support" }
+# `query_instance` merged to escurel `main` (PR #205/#206), so these now
+# point at the main escurel checkout (the feature worktree is gone).
+escurel-client = { path = "../escurel/crates/escurel-client" }
+escurel-types = { path = "../escurel/crates/escurel-types" }
+escurel-test-support = { path = "../escurel/crates/escurel-test-support" }
 triton-tests = { path = "../triton/crates/triton-tests" }

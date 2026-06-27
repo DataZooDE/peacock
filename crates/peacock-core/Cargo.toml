@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 peacock-types = { workspace = true }
+peacock-rasterizer = { workspace = true }
 escurel-client = { workspace = true }
 escurel-types = { workspace = true }
 serde = { workspace = true }

@@ -82,13 +82,12 @@ peacock path-depends on two sibling repos under `/home/jr/Projects/datazoo`:
 
 - **escurel** — `escurel-client` (resolve/expand/**`query_instance`**),
   `escurel-types`, `escurel-test-support` (`EscurelProcess`,
-  `FixtureBuilder`). `query_instance(ref, params)` currently lives on the
-  **`feature/query-instance`** worktree
-  (`../escurel-query-instance`, **uncommitted**). The data path: a
+  `FixtureBuilder`), path-depped at `../escurel`. `query_instance(ref,
+  params)` merged to escurel `main` (PR #205/#206, commit `2f92201`); the
+  former `feature/query-instance` worktree is gone. The data path: a
   `[[query::id]]` page with `target: [[sql_view_instance]]`, `{{target}}`
   substituted with the allow-listed managed view id, `:params` bound as
-  prepared statements. **Repoint the path deps to `../escurel/...` once
-  `query_instance` merges to escurel `main`.**
+  prepared statements.
 - **triton** — `triton-tests` (`TritonProcess`, `FakeConsul/Vault`).
   Upstream contract: Triton dispatches `render_report` to peacock as
   `POST /` + `X-Triton-Tool` + `Authorization: Bearer` + args body;
