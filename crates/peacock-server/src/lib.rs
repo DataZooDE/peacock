@@ -1,13 +1,14 @@
-//! peacock service surfaces (thin shells over `peacock-core`):
-//! the MCP-App surface (`ui://` resource + drill bridge), the chat/upstream
-//! shim (the `POST /` Triton-upstream contract + `render_a2ui_to_png`),
-//! observability (`/healthz`, `/version`, `/metrics`, audit), and lifecycle
-//! (cold start, SIGTERM drain). Surfaces carry no composition logic (HLD §5).
+//! peacock service surfaces (thin shells over `peacock-core`).
+//!
+//! This crate hosts the HTTP faces: the structured/`render_report` surface
+//! (JSON artifact for agents and the demo chat client), observability
+//! (`/healthz`, `/version`), and static serving of the demo SPA. The MCP-App
+//! and Triton-upstream wire shapes layer on top of the same `render_report`
+//! handler.
+//!
+//! Every surface funnels through `peacock_core::render` — surfaces carry no
+//! composition logic (FR-R-1, HLD §5).
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn server_crate_links() {
-        assert_eq!(2 + 2, 4);
-    }
-}
+mod http;
+
+pub use http::{AppState, router, serve};

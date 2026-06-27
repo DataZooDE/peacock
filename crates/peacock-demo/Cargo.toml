@@ -1,0 +1,23 @@
+[package]
+name = "peacock-demo"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "peacock-demo"
+path = "src/main.rs"
+
+[dependencies]
+peacock-core = { workspace = true }
+peacock-server = { workspace = true }
+peacock-test-support = { path = "../peacock-test-support" }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }

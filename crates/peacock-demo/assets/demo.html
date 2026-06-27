@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Copilot · peacock demo</title>
+<style>
+  :root {
+    --bg: #f3f2f1;
+    --panel: #ffffff;
+    --ink: #201f1e;
+    --ink-soft: #605e5c;
+    --ink-faint: #8a8886;
+    --line: #edebe9;
+    --line-strong: #e1dfdd;
+    --user-bubble: #f5f5f3;
+    --accent: #0f6cbd;
+    --accent-soft: #eff6fc;
+    --radius: 14px;
+    --shadow: 0 1.6px 3.6px rgba(0,0,0,.08), 0 6px 18px rgba(0,0,0,.06);
+    --font: "Segoe UI", -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; font-family: var(--font); color: var(--ink);
+    background:
+      radial-gradient(1200px 500px at 80% -10%, rgba(34,211,197,.10), transparent 60%),
+      radial-gradient(1000px 500px at 0% 0%, rgba(232,90,173,.08), transparent 55%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Copilot ribbon mark */
+  .mark { width: 28px; height: 28px; border-radius: 50%; flex: none;
+    background: conic-gradient(from 210deg, #1f8df0, #22d3c5, #38d39f, #f2c14e, #e85aad, #8a63d2, #1f8df0);
+    box-shadow: inset 0 0 0 5px #fff, 0 1px 2px rgba(0,0,0,.18);
+  }
+  .mark.sm { width: 22px; height: 22px; box-shadow: inset 0 0 0 4px #fff, 0 1px 2px rgba(0,0,0,.18); }
+
+  header.topbar {
+    height: 52px; display: flex; align-items: center; gap: 10px;
+    padding: 0 18px; border-bottom: 1px solid var(--line);
+    background: rgba(255,255,255,.72); backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .topbar .brand { font-weight: 600; letter-spacing: .2px; font-size: 15px; }
+  .topbar .ctx {
+    margin-left: auto; display: flex; gap: 8px; align-items: center;
+    font-size: 12px; color: var(--ink-soft);
+  }
+  .ctx .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid #cfe4f7; padding: 4px 10px; border-radius: 999px; font-weight: 600;
+  }
+  .ctx .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #22d3c5; box-shadow: 0 0 0 3px rgba(34,211,197,.18); }
+
+  main { max-width: 880px; margin: 0 auto; padding: 8px 20px 160px; }
+
+  /* Greeting / empty state */
+  .hero { text-align: center; padding: 56px 10px 26px; }
+  .hero .bigmark { width: 56px; height: 56px; margin: 0 auto 18px;
+    border-radius: 50%; background: conic-gradient(from 210deg, #1f8df0, #22d3c5, #38d39f, #f2c14e, #e85aad, #8a63d2, #1f8df0);
+    box-shadow: inset 0 0 0 9px #fff, 0 4px 14px rgba(0,0,0,.12); }
+  .hero h1 { font-size: 28px; font-weight: 600; margin: 0 0 6px;
+    background: linear-gradient(90deg,#1f8df0,#22d3c5,#e85aad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p { color: var(--ink-soft); margin: 0; font-size: 15px; }
+  .suggestions { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin: 26px auto 0; max-width: 680px; }
+  .sugg { text-align: left; background: var(--panel); border: 1px solid var(--line-strong);
+    border-radius: var(--radius); padding: 14px 16px; cursor: pointer; transition: .15s;
+    box-shadow: 0 1px 1px rgba(0,0,0,.03); }
+  .sugg:hover { border-color: #c7c6c4; transform: translateY(-1px); box-shadow: var(--shadow); }
+  .sugg b { display: block; font-size: 14px; margin-bottom: 3px; }
+  .sugg span { font-size: 12.5px; color: var(--ink-faint); }
+
+  /* Messages */
+  .msg { display: flex; gap: 12px; margin: 22px 0; animation: rise .35s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .msg.user { justify-content: flex-end; }
+  .msg.user .bubble { background: var(--user-bubble); border: 1px solid var(--line-strong);
+    padding: 10px 14px; border-radius: 16px 16px 4px 16px; max-width: 70%; font-size: 14.5px; }
+  .msg.bot .avatar { margin-top: 2px; }
+  .msg.bot .body { flex: 1; min-width: 0; }
+  .msg.bot .body .say { font-size: 14.5px; line-height: 1.55; color: var(--ink); }
+  .who { font-size: 12px; color: var(--ink-faint); margin-bottom: 4px; font-weight: 600; }
+
+  /* Typing */
+  .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
+  .typing i { width: 7px; height: 7px; border-radius: 50%; background: #b3b0ad; animation: blink 1.2s infinite both; }
+  .typing i:nth-child(2){ animation-delay:.2s } .typing i:nth-child(3){ animation-delay:.4s }
+  @keyframes blink { 0%,80%,100%{ opacity:.3; transform: translateY(0) } 40%{ opacity:1; transform: translateY(-2px) } }
+
+  /* Report card (the MCP App surface) */
+  .card { margin-top: 12px; background: var(--panel); border: 1px solid var(--line-strong);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .card .head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+  .card .head .t { font-weight: 600; font-size: 14.5px; }
+  .card .head .sub { font-size: 12px; color: var(--ink-faint); }
+  .badge { margin-left: auto; font-size: 11px; font-weight: 600; color: #3b6e22;
+    background: #eef7e8; border: 1px solid #d6ecc6; padding: 3px 9px; border-radius: 999px; }
+  .kpis { display: flex; gap: 12px; padding: 14px 16px 4px; flex-wrap: wrap; }
+  .kpi { flex: 1; min-width: 130px; background: linear-gradient(180deg,#fbfdff,#f4f9fe);
+    border: 1px solid #e4eef8; border-radius: 12px; padding: 12px 14px; }
+  .kpi .l { font-size: 11.5px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .4px; }
+  .kpi .v { font-size: 24px; font-weight: 700; margin-top: 3px; letter-spacing: -.3px; }
+  .kpi .v.accent { color: var(--accent); }
+  .chartwrap { padding: 8px 12px 4px; }
+  .chartwrap img { width: 100%; height: auto; display: block; border-radius: 8px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 6px 16px 14px; }
+  .chip { font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: #fff; transition: .14s; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  details.tbl { border-top: 1px solid var(--line); }
+  details.tbl summary { cursor: pointer; padding: 11px 16px; font-size: 13px; color: var(--ink-soft); user-select: none; }
+  details.tbl[open] summary { color: var(--ink); font-weight: 600; }
+  .tablebox { max-height: 240px; overflow: auto; padding: 0 8px 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { position: sticky; top: 0; background: #fff; color: var(--ink-soft); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Composer */
+  .composer { position: fixed; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(180deg, rgba(243,242,241,0), var(--bg) 38%); padding: 14px 20px 18px; }
+  .composer .inner { max-width: 880px; margin: 0 auto; }
+  .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .quick button { font-size: 12.5px; padding: 7px 12px; border-radius: 999px; cursor: pointer;
+    background: #fff; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+  .quick button:hover { border-color: var(--accent); color: var(--accent); }
+  .inputrow { display: flex; align-items: center; gap: 8px; background: #fff;
+    border: 1px solid var(--line-strong); border-radius: 26px; padding: 6px 6px 6px 18px;
+    box-shadow: var(--shadow); }
+  .inputrow input { flex: 1; border: 0; outline: 0; font: inherit; font-size: 15px; background: transparent; color: var(--ink); }
+  .send { width: 40px; height: 40px; border: 0; border-radius: 50%; cursor: pointer; color: #fff;
+    background: linear-gradient(135deg,#1f8df0,#22d3c5); display: grid; place-items: center; transition: .15s; }
+  .send:hover { filter: brightness(1.06); transform: scale(1.04); }
+  .send:disabled { opacity: .5; cursor: default; transform: none; }
+  .foot { text-align: center; font-size: 11px; color: var(--ink-faint); margin-top: 9px; }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="mark"></div>
+    <div class="brand">Copilot</div>
+    <div class="ctx">
+      <span id="ctxPill" class="pill" style="display:none"><span class="dot"></span><span id="ctxText"></span></span>
+    </div>
+  </header>
+
+  <main id="thread">
+    <section class="hero" id="hero">
+      <div class="bigmark"></div>
+      <h1>Hi, I'm your data Copilot</h1>
+      <p>Ask about your business data — I'll render live, interactive reports from your knowledge base.</p>
+      <div class="suggestions">
+        <div class="sugg" data-q="Show me monthly revenue by product category">
+          <b>Monthly revenue by category</b><span>Northwind sales · 1997 · EMEA</span>
+        </div>
+        <div class="sugg" data-q="How did Beverages perform last year?">
+          <b>Drill into Beverages</b><span>Filter the revenue report to one category</span>
+        </div>
+        <div class="sugg" data-q="What were total sales in 1997?">
+          <b>Total 1997 revenue</b><span>A single number, sourced live</span>
+        </div>
+        <div class="sugg" data-q="Compare categories for the year">
+          <b>Compare all categories</b><span>Trend lines across the year</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="composer">
+    <div class="inner">
+      <div class="quick" id="quick"></div>
+      <div class="inputrow">
+        <input id="input" placeholder="Message Copilot" autocomplete="off" />
+        <button class="send" id="send" title="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-5 8 5 8-16-8z" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <div class="foot">peacock renders · escurel holds the data · responses are generated from live, access-checked rows</div>
+    </div>
+  </div>
+
+<script>
+const REPORT = "northwind-monthly-revenue";
+const PALETTE = ["#4c78a8","#f58518","#54a24b","#e45756","#72b7b2","#ff9da6","#9d755d","#bab0ac"];
+const thread = document.getElementById("thread");
+const hero = document.getElementById("hero");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const quick = document.getElementById("quick");
+const ctxPill = document.getElementById("ctxPill");
+const ctxText = document.getElementById("ctxText");
+let currentParams = { from: "1997-01-01", to: "1997-12-31", category: "ALL" };
+
+const money = n => "$" + Number(n).toLocaleString("en-US", {maximumFractionDigits:0});
+
+function scrollDown(){ window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }
+
+function addUser(text){
+  hero?.remove();
+  const el = document.createElement("div");
+  el.className = "msg user";
+  el.innerHTML = `<div class="bubble"></div>`;
+  el.querySelector(".bubble").textContent = text;
+  thread.appendChild(el); scrollDown();
+}
+
+function addBot(){
+  const el = document.createElement("div");
+  el.className = "msg bot";
+  el.innerHTML = `<div class="avatar"><div class="mark sm"></div></div>
+    <div class="body"><div class="who">Copilot</div><div class="say"></div></div>`;
+  thread.appendChild(el); scrollDown();
+  return el.querySelector(".say");
+}
+
+function typing(say){ say.innerHTML = `<div class="typing"><i></i><i></i><i></i></div>`; }
+
+function kpiTile(label, value, accent){
+  return `<div class="kpi"><div class="l">${label}</div><div class="v ${accent?'accent':''}">${value}</div></div>`;
+}
+
+function renderCard(say, data, lead){
+  const comps = data.a2ui.components || [];
+  const rows = (data.structuredContent.rows) || [];
+  const params = data.structuredContent.current_params || currentParams;
+  currentParams = params;
+
+  // KPI from the report + a couple derived tiles for richness.
+  const kpi = comps.find(c => c.kind === "kpi");
+  const total = kpi ? kpi.value : rows.reduce((a,r)=>a+(+r.revenue||0),0);
+  const cats = [...new Set(rows.map(r => r.category))];
+  const months = [...new Set(rows.map(r => r.month))];
+  const top = cats.map(c => [c, rows.filter(r=>r.category===c).reduce((a,r)=>a+(+r.revenue||0),0)])
+                  .sort((a,b)=>b[1]-a[1])[0];
+
+  const scope = params.category && params.category !== "ALL" ? params.category : "All categories";
+
+  // Drill chips (distinct categories + all).
+  const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
+  const chips = allCats.map(c => {
+    const on = (params.category||"ALL") === c ? "on" : "";
+    const label = c === "ALL" ? "All categories" : c;
+    return `<div class="chip ${on}" data-cat="${c}">${label}</div>`;
+  }).join("");
+
+  // Table.
+  const head = `<tr><th>Month</th><th>Category</th><th class="num">Revenue</th></tr>`;
+  const trs = rows.map(r => `<tr><td>${r.month}</td><td>${r.category}</td><td class="num">${money(r.revenue)}</td></tr>`).join("");
+
+  const img = data.png_base64 ? `<div class="chartwrap"><img alt="Revenue chart" src="data:image/png;base64,${data.png_base64}"/></div>` : "";
+
+  say.innerHTML = `
+    <div style="margin-bottom:10px">${lead}</div>
+    <div class="card">
+      <div class="head">
+        <div class="mark sm"></div>
+        <div><div class="t">Northwind revenue by category</div><div class="sub">${scope} · ${months.length} months · live from escurel</div></div>
+        <div class="badge">MCP App · live</div>
+      </div>
+      <div class="kpis">
+        ${kpiTile("Total revenue", money(total), true)}
+        ${kpiTile("Categories", String(cats.length))}
+        ${kpiTile("Top category", top ? top[0] : "—")}
+      </div>
+      ${img}
+      <div class="chips">${chips}</div>
+      <details class="tbl"><summary>Show data (${rows.length} rows)</summary>
+        <div class="tablebox"><table>${head}${trs}</table></div>
+      </details>
+    </div>`;
+
+  // wire drill chips
+  say.querySelectorAll(".chip").forEach(ch => ch.addEventListener("click", () => drill(ch.dataset.cat)));
+
+  // context sync indicator (the agent now "knows" the view state)
+  ctxPill.style.display = "inline-flex";
+  ctxText.textContent = `Context · category = ${params.category||"ALL"}`;
+}
+
+async function callRender(params){
+  const res = await fetch("/v1/render_report", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ report_id: REPORT, params, png: true })
+  });
+  if(!res.ok){ const e = await res.json().catch(()=>({message:res.statusText})); throw new Error(e.message||"render failed"); }
+  return res.json();
+}
+
+function leadFor(data){
+  const rows = data.structuredContent.rows || [];
+  const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
+  const p = data.structuredContent.current_params || {};
+  if(p.category && p.category !== "ALL")
+    return `Here's <b>${p.category}</b> revenue across 1997 — it totalled <b>${money(total)}</b>. Tap another category to compare, or ask me a follow-up.`;
+  return `Here's <b>monthly revenue by product category</b> for 1997 (Northwind, EMEA). The full year came to <b>${money(total)}</b>. Tap a category to drill in.`;
+}
+
+async function showReport(params, userText){
+  if(userText) addUser(userText);
+  const say = addBot(); typing(say);
+  try {
+    const data = await callRender(params);
+    renderCard(say, data, leadFor(data));
+    showQuick();
+  } catch(e){
+    say.innerHTML = `I couldn't render that — <em>${e.message}</em>`;
+  }
+  scrollDown();
+}
+
+async function drill(cat){
+  const params = { ...currentParams, category: cat };
+  const label = cat === "ALL" ? "all categories" : cat;
+  addUser(`Show ${label}`);
+  const say = addBot(); typing(say);
+  try {
+    const data = await callRender(params);
+    renderCard(say, data, leadFor(data));
+  } catch(e){ say.innerHTML = `Couldn't drill — <em>${e.message}</em>`; }
+  scrollDown();
+}
+
+function showQuick(){
+  quick.innerHTML = "";
+  [["Filter to Beverages","Beverages"],["Filter to Seafood","Seafood"],["Back to all categories","ALL"]]
+    .forEach(([label,cat]) => {
+      const b = document.createElement("button"); b.textContent = label;
+      b.onclick = () => drill(cat); quick.appendChild(b);
+    });
+}
+
+// Intent routing — tiny keyword match so typing feels real.
+function route(text){
+  const t = text.toLowerCase();
+  const cat = ["beverages","condiments","dairy","produce","seafood"].find(c => t.includes(c));
+  if(cat){
+    const map = {dairy:"Dairy Products"};
+    const proper = map[cat] || cat[0].toUpperCase()+cat.slice(1);
+    return { params: { ...currentParams, category: proper } };
+  }
+  return { params: { from:"1997-01-01", to:"1997-12-31", category:"ALL" } };
+}
+
+function submit(text){
+  if(!text.trim()) return;
+  const { params } = route(text);
+  showReport(params, text);
+}
+
+sendBtn.onclick = () => { const v = input.value; input.value=""; submit(v); };
+input.addEventListener("keydown", e => { if(e.key==="Enter"){ const v=input.value; input.value=""; submit(v); }});
+document.querySelectorAll(".sugg").forEach(s => s.addEventListener("click", () => submit(s.dataset.q)));
+</script>
+</body>
+</html>

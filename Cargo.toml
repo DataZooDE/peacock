@@ -7,6 +7,7 @@ members = [
     "crates/peacock-server",
     "crates/peacock-bin",
     "crates/peacock-test-support",
+    "crates/peacock-demo",
 ]
 
 [workspace.package]
@@ -47,6 +48,7 @@ tempfile = "3"
 resvg = "0.47"
 usvg = "0.47"
 tiny-skia = "0.12"
+base64 = "0.22"
 
 # Cross-repo path dependencies (see CLAUDE.md "Cross-repo dependencies").
 # `query_instance` merged to escurel `main` (PR #205/#206), so these now

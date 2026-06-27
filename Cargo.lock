@@ -3718,6 +3718,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "peacock-demo"
+version = "0.1.0"
+dependencies = [
+ "peacock-core",
+ "peacock-server",
+ "peacock-test-support",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "peacock-rasterizer"
 version = "0.1.0"
 dependencies = [
@@ -3734,8 +3745,12 @@ name = "peacock-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64",
+ "escurel-test-support",
  "peacock-core",
+ "peacock-test-support",
  "peacock-types",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
