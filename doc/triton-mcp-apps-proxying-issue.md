@@ -1,5 +1,18 @@
 # Triton feature request: MCP-Apps proxying + PNG-rasterization delegation for upstream renderers
 
+> **UPDATE 2026-06-27 — parts A/B/C have LANDED in Triton (issue #143).** The
+> current `crates/triton-adapters-http/src/mcp.rs` already (A) surfaces an
+> upstream result's `_meta.ui` on the `tools/call` response, (B) proxies
+> `resources/read` of a `ui://<authority>/…` URI to the owning upstream via
+> `POST /` + header `X-Triton-MCP: resources/read`, body `{ "uri": … }`, and
+> (C) relays `updateModelContext` via `X-Triton-MCP: updateModelContext`,
+> body `{ uri, record }` (record verbatim). peacock implements that exact
+> upstream contract (see `peacock-server`'s `POST /` handler) and its
+> Triton-proxied tests are now enabled. **Part D (delegating chat dashboard
+> rasterization to a registered `render_a2ui_to_png` upstream) is the
+> remaining open item.**
+
+
 > **Paste-ready.** Copy this file's body into a new issue on
 > `github.com/DataZooDE/triton`. Verified against the current triton tree
 > (`crates/triton-adapters-http`, `crates/triton-core`,

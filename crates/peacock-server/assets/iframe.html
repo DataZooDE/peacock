@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>peacock report</title>
+<style>
+  :root { --ink:#201f1e; --soft:#605e5c; --line:#e1dfdd; --accent:#0f6cbd; --font:"Segoe UI",system-ui,sans-serif; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:var(--font); color:var(--ink); background:#fff; }
+  .wrap { padding:14px; }
+  .head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .head .t { font-weight:600; font-size:15px; }
+  .head .sub { font-size:12px; color:var(--soft); }
+  .kpis { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+  .kpi { flex:1; min-width:120px; background:#f4f9fe; border:1px solid #e4eef8; border-radius:10px; padding:10px 12px; }
+  .kpi .l { font-size:11px; color:var(--soft); text-transform:uppercase; letter-spacing:.4px; }
+  .kpi .v { font-size:22px; font-weight:700; color:var(--accent); }
+  img { width:100%; height:auto; border-radius:8px; display:block; }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
+  .chip { font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line); background:#fff; }
+  .chip.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th,td { text-align:left; padding:6px 9px; border-bottom:1px solid var(--line); }
+  td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .muted { color:var(--soft); font-size:12px; }
+</style>
+</head>
+<body>
+  <div class="wrap" id="app"><div class="muted">Loading report…</div></div>
+<script>
+// The MCP-Apps iframe runtime. Renders a peacock report and routes committed
+// drills back to the host via callServerTool (re-render) + updateModelContext
+// (compact view-state). Falls back to peacock's own HTTP endpoint when opened
+// standalone (no MCP host), so the resource is independently verifiable.
+const REPORT_ID = "__REPORT_ID__";
+const money = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+let params = { from: "1997-01-01", to: "1997-12-31", category: "ALL" };
+
+// MCP-Apps host bridge (postMessage). When embedded, the host fulfils these.
+function callServerTool(name, args) {
+  return new Promise((resolve, reject) => {
+    if (window.parent === window) {
+      // standalone: call peacock directly
+      fetch("/v1/render_report", { method:"POST", headers:{ "content-type":"application/json" },
+        body: JSON.stringify({ report_id: args.report_id, params: args.params, png: true }) })
+        .then(r => r.json()).then(resolve, reject);
+      return;
+    }
+    const reqId = "r" + Math.random().toString(36).slice(2);
+    const onMsg = e => {
+      if (e.data && e.data.type === "mcp:callServerTool:result" && e.data.reqId === reqId) {
+        window.removeEventListener("message", onMsg); resolve(e.data.result);
+      }
+    };
+    window.addEventListener("message", onMsg);
+    window.parent.postMessage({ type:"mcp:callServerTool", reqId, name, arguments: args }, "*");
+  });
+}
+function updateModelContext(record) {
+  if (window.parent !== window)
+    window.parent.postMessage({ type:"mcp:updateModelContext", record }, "*");
+}
+
+function render(data) {
+  const sc = data.structuredContent || data;
+  const rows = (sc.rows) || [];
+  params = sc.current_params || params;
+  const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
+  const cats = [...new Set(rows.map(r=>r.category))];
+  const png = (data._meta && data._meta.png_base64) || data.png_base64;
+  const scope = params.category && params.category!=="ALL" ? params.category : "All categories";
+  const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
+
+  document.getElementById("app").innerHTML = `
+    <div class="head"><div><div class="t">Northwind revenue by category</div>
+      <div class="sub">${scope} · live from escurel</div></div></div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">Total revenue</div><div class="v">${money(total)}</div></div>
+      <div class="kpi"><div class="l">Categories</div><div class="v" style="color:#201f1e">${cats.length}</div></div>
+    </div>
+    ${png ? `<img alt="chart" src="data:image/png;base64,${png}">` : ""}
+    <div class="chips">${allCats.map(c=>`<span class="chip ${(params.category||'ALL')===c?'on':''}" data-cat="${c}">${c==='ALL'?'All':c}</span>`).join("")}</div>
+    <table><tr><th>Month</th><th>Category</th><th class="num">Revenue</th></tr>
+      ${rows.map(r=>`<tr><td>${r.month}</td><td>${r.category}</td><td class="num">${money(r.revenue)}</td></tr>`).join("")}</table>`;
+
+  document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => drill(ch.dataset.cat));
+}
+
+async function drill(cat) {
+  const next = { ...params, category: cat };
+  const data = await callServerTool("render_report", { report_id: REPORT_ID, params: next });
+  render(data);
+  // committed selection → push compact view-state to the model (FR-X-3)
+  const rows = (data.structuredContent||data).rows || [];
+  const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
+  updateModelContext({ report_id: REPORT_ID, params: (data.structuredContent||data).current_params,
+                       salient_summary: `${cat==='ALL'?'All categories':cat}: ${money(total)} (1997)` });
+}
+
+callServerTool("render_report", { report_id: REPORT_ID, params }).then(render)
+  .catch(e => document.getElementById("app").innerHTML = `<div class="muted">Couldn't load: ${e}</div>`);
+</script>
+</body>
+</html>

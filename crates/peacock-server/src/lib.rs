@@ -10,5 +10,8 @@
 //! composition logic (FR-R-1, HLD §5).
 
 mod http;
+mod mcp;
+mod upstream;
 
 pub use http::{AppState, router, serve};
+pub use mcp::UI_AUTHORITY;

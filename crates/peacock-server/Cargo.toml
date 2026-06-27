@@ -24,4 +24,5 @@ tracing = { workspace = true }
 [dev-dependencies]
 peacock-test-support = { path = "../peacock-test-support" }
 escurel-test-support = { workspace = true }
+triton-tests = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

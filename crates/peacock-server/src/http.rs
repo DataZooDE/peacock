@@ -33,7 +33,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/healthz", get(healthz))
         .route("/version", get(version))
         .route("/v1/render_report", post(render_report))
-        .route("/", get(index))
+        // MCP-Apps JSON-RPC surface (peacock's own host-facing endpoint).
+        .route("/mcp", post(crate::mcp::handle))
+        // Triton upstream contract (GET / serves the demo SPA; POST / is the
+        // header-routed Triton dispatch).
+        .route("/", get(index).post(crate::upstream::handle))
         .with_state(state)
 }
 
