@@ -3763,13 +3763,19 @@ checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 name = "peacock-bin"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
  "peacock-core",
  "peacock-server",
+ "peacock-test-support",
  "peacock-types",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
+ "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
 ]
@@ -3844,6 +3850,7 @@ dependencies = [
  "escurel-client",
  "escurel-test-support",
  "peacock-types",
+ "reqwest 0.12.28",
  "secrecy",
  "serde",
  "serde_json",

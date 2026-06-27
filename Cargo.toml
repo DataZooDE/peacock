@@ -44,6 +44,7 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 async-trait = "0.1"
 secrecy = "0.10"
 tempfile = "3"
+toml = "0.8"
 # Pure-Rust SVG → PNG (no Node, no network, NFR-S-5). peacock renders its
 # guardrail-restricted Vega-Lite subset to SVG itself, then rasterizes here.
 resvg = "0.47"
