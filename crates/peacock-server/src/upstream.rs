@@ -22,6 +22,7 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use base64::Engine as _;
 use peacock_core::{RenderOpts, render};
 use serde_json::{Value, json};
 
@@ -62,13 +63,54 @@ pub async fn handle(
 }
 
 async fn tool_call(state: &AppState, tool: &str, args: Value) -> Response {
-    if tool != "render_report" {
-        return (
+    match tool {
+        "render_report" => render_report_tool(state, args).await,
+        // Part D (#143 D): rasterize Triton's dashboard `{title, tiles}` to a
+        // PNG and return it base64-encoded — the capability Triton's chat
+        // surface delegates to via TRITON_RASTERIZE_UPSTREAM.
+        "render_a2ui_to_png" => render_a2ui_to_png(state, args),
+        other => (
             StatusCode::NOT_FOUND,
-            Json(json!({ "error": format!("unknown tool `{tool}`") })),
+            Json(json!({ "error": format!("unknown tool `{other}`") })),
         )
-            .into_response();
+            .into_response(),
     }
+}
+
+/// Cap parity with Triton's `MAX_RESPONSE_BYTES` — a rendered PNG over 2 MiB is
+/// refused rather than shipped.
+const MAX_PNG_BYTES: usize = 2 * 1024 * 1024;
+
+fn render_a2ui_to_png(state: &AppState, args: Value) -> Response {
+    let req: peacock_rasterizer::DashboardRequest = match serde_json::from_value(args) {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": format!("bad dashboard spec: {e}") })),
+            )
+                .into_response();
+        }
+    };
+    match peacock_rasterizer::render_dashboard_to_png(&req, state.png_scale) {
+        Ok(png) if png.len() <= MAX_PNG_BYTES => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+            Json(json!({ "png_base64": b64 })).into_response()
+        }
+        Ok(png) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": format!("png exceeds {MAX_PNG_BYTES}-byte cap ({} bytes)", png.len()) })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(json!({ "error": format!("rasterization failed: {e}") })),
+        )
+            .into_response(),
+    }
+}
+
+async fn render_report_tool(state: &AppState, args: Value) -> Response {
     let report_id = match args.get("report_id").and_then(Value::as_str) {
         Some(r) => r.to_owned(),
         None => {

@@ -8,9 +8,11 @@
 //! vendored for deterministic, offline text. See the discovered note for why
 //! this replaces vl-convert.
 
+pub mod dashboard;
 mod raster;
 pub mod vegalite_svg;
 
+pub use dashboard::{DashboardRequest, render_dashboard_to_png, render_dashboard_to_svg};
 pub use raster::render_svg_to_png;
 pub use vegalite_svg::vegalite_to_svg;
 

@@ -23,3 +23,6 @@ target
 # Flutter build output (rebuilt via `flutter build web`)
 web/peacock-web/build/
 web/peacock-web/.dart_tool/
+
+# Agent worktrees (isolated subagent copies)
+.claude/worktrees/

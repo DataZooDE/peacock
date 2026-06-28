@@ -8,9 +8,15 @@
 > (C) relays `updateModelContext` via `X-Triton-MCP: updateModelContext`,
 > body `{ uri, record }` (record verbatim). peacock implements that exact
 > upstream contract (see `peacock-server`'s `POST /` handler) and its
-> Triton-proxied tests are now enabled. **Part D (delegating chat dashboard
-> rasterization to a registered `render_a2ui_to_png` upstream) is the
-> remaining open item.**
+> Triton-proxied tests are now enabled. **Part D also LANDED** (Triton PR #147 /
+> #148): `TRITON_RASTERIZE_UPSTREAM=render_a2ui_to_png` makes Triton's chat
+> surface delegate dashboard rasterization to a registered upstream tool
+> `render_a2ui_to_png` (it sends `DashboardRequest {title, tiles}`, expects
+> `{png_base64}`). peacock implements that tool on its `POST /` upstream
+> surface (`peacock-server`'s `render_a2ui_to_png`, rendered by the pure-Rust
+> rasterizer) and tests it both directly and through a real Triton dispatch
+> (`rasterize_delegate.rs`). **All of A/B/C/D are now done — this issue is
+> fully resolved.**
 
 
 > **Paste-ready.** Copy this file's body into a new issue on

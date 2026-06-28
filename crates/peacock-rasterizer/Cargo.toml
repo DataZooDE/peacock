@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 peacock-types = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 # Pure-Rust SVG → PNG. peacock compiles its guardrail-restricted Vega-Lite
