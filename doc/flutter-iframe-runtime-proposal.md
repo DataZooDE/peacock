@@ -105,15 +105,18 @@ The shim is loaded from peacock's `/app` origin, so the nested Flutter iframe is
 **same-origin** with the shim — `postMessage` and relay work without
 cross-origin friction, while the host sees only the one shim resource.
 
-> **Why not change `mcp.rs` to return the shim?** `crates/peacock-server/src/mcp.rs`
-> is intentionally out of scope for this change, so `resources/read` still
-> returns the existing self-contained `iframe.html`. The Flutter path is fully
-> in place behind it: serving the shim, the nested bundle, and the Dart bridge.
-> The single remaining one-line cutover — have `resources_read` serve the shim
-> (with the same `__REPORT_ID__` injection) instead of `iframe.html`, or 302 to
-> `/app-shim?report=<id>` — is a follow-up PR scoped to `mcp.rs`. Until then
-> `iframe.html` remains the inlined runtime and the Flutter app is reachable
-> standalone at `/app` and via `/app-shim`.
+> **`mcp.rs` cutover — DONE (config-gated, non-regressing).** `resources_read`
+> now serves the **Flutter shim** when `AppState.flutter_app_url` is set (a
+> host-reachable absolute base for peacock's `/app/`), injecting both
+> `__PEACOCK_APP_BASE__` and `__REPORT_ID__`; otherwise it serves the
+> self-contained `iframe.html`. This guard matters: **behind Triton's proxy the
+> host cannot fetch peacock's multi-file bundle**, so the shim's nested `/app/`
+> iframe would not resolve — there, `iframe.html` (which needs nothing external,
+> rendering inline from `callServerTool` + the PNG) is the only correct
+> resource. The demo sets `flutter_app_url` to its own origin, so its `ui://`
+> resource is the Flutter shim; deployments where the host can reach peacock's
+> `/app/` opt in the same way. Covered by `mcp_surface.rs`
+> (`resources_read_serves_the_iframe_runtime` / `_the_flutter_shim_when_app_url_is_set`).
 
 ## Why this is the right shape
 

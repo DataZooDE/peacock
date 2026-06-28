@@ -18,6 +18,7 @@ async fn start() -> (NorthwindEscurel, String) {
         png_scale: 2.0,
         demo_html: "<!doctype html>",
         flutter_dir: None,
+        flutter_app_url: None,
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -108,6 +109,53 @@ async fn resources_read_serves_the_iframe_runtime() {
         html.contains("updateModelContext"),
         "iframe pushes view state"
     );
+    // No flutter_app_url configured → the self-contained iframe, not the shim.
+    assert!(
+        !html.contains("peacock-app"),
+        "without flutter_app_url, the ui:// resource is the self-contained iframe"
+    );
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn resources_read_serves_the_flutter_shim_when_app_url_is_set() {
+    // With a host-reachable flutter_app_url, the ui:// resource is the Flutter
+    // shim that nests the hosted /app/ bundle (the direct-reachable deployment).
+    let nw = NorthwindEscurel::spawn().await;
+    let state = Arc::new(AppState {
+        escurel: EscurelData::new(nw.endpoint()),
+        principal: nw.sales_principal(),
+        png_scale: 2.0,
+        demo_html: "<!doctype html>",
+        flutter_dir: None,
+        flutter_app_url: Some("http://peacock.example/app/".into()),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    tokio::spawn(async move { serve(addr, state).await.unwrap() });
+    for _ in 0..50 {
+        if reqwest::get(format!("http://{addr}/healthz")).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let r = rpc(
+        &format!("http://{addr}"),
+        "resources/read",
+        json!({ "uri": format!("ui://peacock/{NW_REPORT}") }),
+    )
+    .await;
+    let html = r["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(
+        html.contains("peacock-app"),
+        "the shim nests the Flutter app"
+    );
+    assert!(
+        html.contains("http://peacock.example/app/"),
+        "shim points at the configured app base"
+    );
+    assert!(html.contains(NW_REPORT));
     nw.shutdown().await;
 }
 

@@ -28,6 +28,12 @@ pub struct AppState {
     /// Optional built Flutter-web bundle directory, served at `/app` (the
     /// richer client surface, FR-M-1). `None` skips it.
     pub flutter_dir: Option<std::path::PathBuf>,
+    /// Optional **host-reachable** absolute base URL for peacock's hosted
+    /// Flutter `/app/` (e.g. `http://peacock.tailnet:8080/app/`). When set, the
+    /// MCP-Apps `ui://` resource is the Flutter shim that nests it; when `None`
+    /// (the default, and required behind Triton's proxy where the host cannot
+    /// reach the bundle) the `ui://` resource is the self-contained iframe.
+    pub flutter_app_url: Option<String>,
 }
 
 /// Build the peacock HTTP router.

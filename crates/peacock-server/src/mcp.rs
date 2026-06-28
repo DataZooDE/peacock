@@ -19,8 +19,17 @@ use crate::AppState;
 /// The `ui://` authority peacock owns (matches its Triton upstream name).
 pub const UI_AUTHORITY: &str = "peacock";
 
-/// The iframe runtime served as the `ui://peacock/<report>` resource.
+/// The self-contained single-file iframe runtime — the `ui://peacock/<report>`
+/// resource when peacock is reached only via Triton (the host cannot fetch
+/// peacock's multi-file Flutter bundle). It renders the report inline from
+/// `callServerTool` + the PNG, needing nothing external.
 const IFRAME_HTML: &str = include_str!("../assets/iframe.html");
+
+/// The Flutter runtime shim — used as the `ui://` resource when a host-reachable
+/// `flutter_app_url` is configured (it nests peacock's hosted `/app/` Flutter
+/// bundle and relays the MCP-Apps postMessage channel). See
+/// `doc/flutter-iframe-runtime-proposal.md`.
+const FLUTTER_SHIM_HTML: &str = include_str!("../assets/flutter-shim.html");
 
 /// JSON-RPC entrypoint for `POST /mcp`.
 pub async fn handle(
@@ -35,7 +44,7 @@ pub async fn handle(
         "initialize" => Ok(initialize()),
         "tools/list" => Ok(tools_list()),
         "tools/call" => tools_call(&state, &params).await,
-        "resources/read" => resources_read(&params),
+        "resources/read" => resources_read(&params, state.flutter_app_url.as_deref()),
         "updateModelContext" => Ok(json!({ "ok": true })),
         other => Err(Error::validation(format!("unknown method `{other}`"))),
     };
@@ -133,14 +142,27 @@ fn summary(report_id: &str, art: &Artifact) -> String {
 }
 
 /// `resources/read ui://peacock/<report>` → the iframe runtime HTML (FR-M-1).
-pub(crate) fn resources_read(params: &Value) -> Result<Value, Error> {
+///
+/// When `flutter_app_url` is set (a host-reachable absolute base for peacock's
+/// hosted Flutter `/app/`), the resource is the **Flutter shim** that nests it.
+/// Otherwise — the default, and the only correct choice when peacock is reached
+/// only via Triton's proxy — it is the **self-contained** `iframe.html` (the
+/// host can't fetch the multi-file Flutter bundle through `resources/read`).
+pub(crate) fn resources_read(
+    params: &Value,
+    flutter_app_url: Option<&str>,
+) -> Result<Value, Error> {
     let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
     let report_id = uri
         .strip_prefix(&format!("ui://{UI_AUTHORITY}/"))
         .ok_or_else(|| Error::validation(format!("not a peacock ui:// resource: {uri}")))?;
 
-    // Inject the report id the iframe should render.
-    let html = IFRAME_HTML.replace("__REPORT_ID__", report_id);
+    let html = match flutter_app_url {
+        Some(base) => FLUTTER_SHIM_HTML
+            .replace("__PEACOCK_APP_BASE__", base)
+            .replace("__REPORT_ID__", report_id),
+        None => IFRAME_HTML.replace("__REPORT_ID__", report_id),
+    };
     Ok(json!({
         "contents": [{ "uri": uri, "mimeType": "text/html", "text": html }]
     }))

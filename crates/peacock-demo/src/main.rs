@@ -25,12 +25,23 @@ async fn main() {
     let nw = NorthwindEscurel::spawn().await;
     eprintln!("peacock-demo: escurel up at {}", nw.endpoint());
 
+    let port: u16 = std::env::var("PEACOCK_DEMO_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8080);
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+
     // Serve the built Flutter-web client at /app when the bundle exists.
     let flutter_dir = {
         let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../web/peacock-web/build/web");
         d.is_dir().then_some(d)
     };
+    // The demo is directly reachable, so its MCP-Apps `ui://` resource uses the
+    // Flutter shim pointing at this server's own `/app/`.
+    let flutter_app_url = flutter_dir
+        .as_ref()
+        .map(|_| format!("http://127.0.0.1:{port}/app/"));
 
     let state = Arc::new(AppState {
         escurel: EscurelData::new(nw.endpoint()),
@@ -38,13 +49,8 @@ async fn main() {
         png_scale: 2.0,
         demo_html: DEMO_HTML,
         flutter_dir,
+        flutter_app_url,
     });
-
-    let port: u16 = std::env::var("PEACOCK_DEMO_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(8080);
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
 
     println!("\n  ✦ peacock demo ready → http://{addr}\n");
     // Keep the escurel process alive for the server's lifetime.

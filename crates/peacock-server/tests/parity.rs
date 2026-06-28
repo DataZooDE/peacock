@@ -19,6 +19,7 @@ async fn start() -> (NorthwindEscurel, String) {
         png_scale: 2.0,
         demo_html: "<!doctype html>",
         flutter_dir: None,
+        flutter_app_url: None,
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

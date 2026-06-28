@@ -107,6 +107,7 @@ async fn run(s: Settings) -> Result<(), String> {
         demo_html: "<!doctype html><title>peacock</title><p>peacock is running. \
                     POST /v1/render_report or /mcp.</p>",
         flutter_dir: None,
+        flutter_app_url: None,
     });
 
     let addr: std::net::SocketAddr = s

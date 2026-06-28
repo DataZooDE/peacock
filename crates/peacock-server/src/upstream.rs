@@ -40,7 +40,7 @@ pub async fn handle(
     }
     if let Some(op) = headers.get("x-triton-mcp").and_then(|v| v.to_str().ok()) {
         return match op {
-            "resources/read" => match resources_read(&body) {
+            "resources/read" => match resources_read(&body, state.flutter_app_url.as_deref()) {
                 Ok(r) => Json(r).into_response(),
                 Err(e) => {
                     (StatusCode::NOT_FOUND, Json(json!({ "error": e.kind() }))).into_response()

@@ -213,22 +213,59 @@ pub fn categorical_scheme(name: Option<&str>) -> &'static [&'static str] {
     }
 }
 
-/// A small viridis-like sequential ramp (control points, dark→bright).
+// Canonical 9-stop ramps (matplotlib viridis/magma, ColorBrewer Blues/Greens)
+// — linearly interpolated by `sequential_color`, so more stops ⇒ truer colour.
 const VIRIDIS: &[(u8, u8, u8)] = &[
     (68, 1, 84),
+    (71, 45, 123),
     (59, 82, 139),
+    (44, 114, 142),
     (33, 145, 140),
+    (40, 174, 128),
     (94, 201, 98),
+    (173, 220, 48),
     (253, 231, 37),
 ];
-
-/// "Blues"-ish sequential ramp.
-const BLUES: &[(u8, u8, u8)] = &[(247, 251, 255), (107, 174, 214), (8, 48, 107)];
+const MAGMA: &[(u8, u8, u8)] = &[
+    (0, 0, 4),
+    (28, 16, 68),
+    (79, 18, 123),
+    (129, 37, 129),
+    (181, 54, 122),
+    (229, 80, 100),
+    (251, 135, 97),
+    (254, 194, 135),
+    (252, 253, 191),
+];
+const BLUES: &[(u8, u8, u8)] = &[
+    (247, 251, 255),
+    (222, 235, 247),
+    (198, 219, 239),
+    (158, 202, 225),
+    (107, 174, 214),
+    (66, 146, 198),
+    (33, 113, 181),
+    (8, 81, 156),
+    (8, 48, 107),
+];
+const GREENS: &[(u8, u8, u8)] = &[
+    (247, 252, 245),
+    (229, 245, 224),
+    (199, 233, 192),
+    (161, 217, 155),
+    (116, 196, 118),
+    (65, 171, 93),
+    (35, 139, 69),
+    (0, 109, 44),
+    (0, 68, 27),
+];
 
 /// Interpolate a sequential colour at `t` in `[0,1]` for the named scheme.
 pub fn sequential_color(scheme: Option<&str>, t: f64) -> String {
     let ramp: &[(u8, u8, u8)] = match scheme {
         Some("blues") => BLUES,
+        Some("greens") => GREENS,
+        Some("magma") | Some("inferno") | Some("plasma") => MAGMA,
         _ => VIRIDIS,
     };
     let t = t.clamp(0.0, 1.0);
@@ -268,4 +305,31 @@ pub fn explicit_color_range(channel: &Value) -> Option<Vec<String>> {
                 .map(str::to_owned)
                 .collect()
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sequential_color;
+
+    #[test]
+    fn sequential_schemes_resolve_and_vary() {
+        // Endpoints differ from the midpoint, and the named schemes differ.
+        for s in [
+            Some("viridis"),
+            Some("magma"),
+            Some("blues"),
+            Some("greens"),
+            None,
+        ] {
+            let lo = sequential_color(s, 0.0);
+            let mid = sequential_color(s, 0.5);
+            let hi = sequential_color(s, 1.0);
+            assert_ne!(lo, hi, "{s:?} ramp endpoints differ");
+            assert_ne!(lo, mid, "{s:?} ramp interpolates");
+        }
+        assert_ne!(
+            sequential_color(Some("blues"), 0.5),
+            sequential_color(Some("greens"), 0.5)
+        );
+    }
 }
