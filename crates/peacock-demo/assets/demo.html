@@ -261,16 +261,22 @@
       <p>Ask about your business data — I'll render live, interactive reports from your knowledge base.</p>
       <div class="suggestions">
         <div class="sugg" data-q="Show me monthly revenue by product category">
-          <b>Monthly revenue by category</b><span>Northwind sales · 1997 · EMEA</span>
+          <b>📊 Monthly revenue by category</b><span>Stacked bars across 1997 · drill a category</span>
+        </div>
+        <div class="sugg" data-q="What are our best-selling products?">
+          <b>🏆 Top products</b><span>Best sellers, ranked by revenue</span>
+        </div>
+        <div class="sugg" data-q="Where do our sales come from by country?">
+          <b>🌍 Sales by country</b><span>Revenue share by destination (donut)</span>
+        </div>
+        <div class="sugg" data-q="Show the seasonality heatmap">
+          <b>🔥 Seasonality heatmap</b><span>Which categories peak in which months</span>
+        </div>
+        <div class="sugg" data-q="Do discounts drive bigger orders?">
+          <b>💸 Discounts vs order value</b><span>Scatter of discount % vs line revenue</span>
         </div>
         <div class="sugg" data-q="How did Beverages perform last year?">
-          <b>Drill into Beverages</b><span>Filter the revenue report to one category</span>
-        </div>
-        <div class="sugg" data-q="What were total sales in 1997?">
-          <b>Total 1997 revenue</b><span>A single number, sourced live</span>
-        </div>
-        <div class="sugg" data-q="Compare categories for the year">
-          <b>Compare all categories</b><span>Trend lines across the year</span>
+          <b>🔍 Drill into Beverages</b><span>Filter the revenue report to one category</span>
         </div>
       </div>
     </section>
@@ -303,8 +309,16 @@
   </div>
 
 <script>
-const REPORT = "northwind-monthly-revenue";
-const PALETTE = ["#4c78a8","#f58518","#54a24b","#e45756","#72b7b2","#ff9da6","#9d755d","#bab0ac"];
+// The Northwind scenarios this demo can render. Each is a distinct escurel
+// report (different question, different chart shape); `drill` marks the ones
+// that support the category filter chips.
+const REPORTS = {
+  "northwind-monthly-revenue": { icon: "📊", title: "Revenue by category", drill: "category" },
+  "northwind-top-products":    { icon: "🏆", title: "Top products by revenue" },
+  "northwind-sales-by-country":{ icon: "🌍", title: "Sales by country" },
+  "northwind-seasonality":     { icon: "🔥", title: "Revenue seasonality (heatmap)", drill: "category" },
+  "northwind-discount-vs-value":{ icon: "💸", title: "Discounts vs order value" },
+};
 const thread = document.getElementById("thread");
 const hero = document.getElementById("hero");
 const input = document.getElementById("input");
@@ -313,9 +327,20 @@ const quick = document.getElementById("quick");
 const ctxPill = document.getElementById("ctxPill");
 const ctxText = document.getElementById("ctxText");
 let currentParams = { from: "1997-01-01", to: "1997-12-31", category: "ALL" };
+let currentReport = "northwind-monthly-revenue";
+let lastReport = currentReport, lastParams = null;
 
 const money = n => "$" + Number(n).toLocaleString("en-US", {maximumFractionDigits:0});
 const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const NUMCOL = /revenue|value|price|quantity|discount|total|count/i;
+const prettyCol = c => c.replace(/_pct$/," %").replace(/_/g," ").replace(/^./, m => m.toUpperCase());
+function fmtCell(col, v){
+  const n = Number(v);
+  if(v === null || v === undefined || (typeof v !== "number" && isNaN(n))) return esc(String(v));
+  if(/discount/i.test(col)) return n.toFixed(0) + "%";
+  if(/revenue|value|price|total/i.test(col)) return money(n);
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
 
 // Make the inspector rail resizable against the chat: dragging the handle sets
 // --insp-w, which drives the rail width AND the chat's reserved space (body
@@ -402,61 +427,66 @@ function kpiTile(label, value, accent){
 }
 
 function renderCard(say, data, lead){
+  const report = REPORTS[currentReport] || { title: currentReport };
   const comps = data.a2ui.components || [];
-  const rows = (data.structuredContent.rows) || [];
+  const rows = data.structuredContent.rows || [];
   const params = data.structuredContent.current_params || currentParams;
   currentParams = params;
+  const cols = rows.length ? Object.keys(rows[0]) : [];
 
-  // KPI from the report + a couple derived tiles for richness.
-  const kpi = comps.find(c => c.kind === "kpi");
-  const total = kpi ? kpi.value : rows.reduce((a,r)=>a+(+r.revenue||0),0);
-  const cats = [...new Set(rows.map(r => r.category))];
-  const months = [...new Set(rows.map(r => r.month))];
-  const top = cats.map(c => [c, rows.filter(r=>r.category===c).reduce((a,r)=>a+(+r.revenue||0),0)])
-                  .sort((a,b)=>b[1]-a[1])[0];
+  // KPI tiles: render the report's own kpi component(s), formatted by label,
+  // plus a row-count tile — all driven by what peacock actually composed.
+  const kpis = comps.filter(c => c.kind === "kpi").map((k, i) => {
+    let val = k.value;
+    if(typeof val === "number"){
+      if(/%|discount/i.test(k.label)) val = val.toFixed(0) + "%";
+      else if(/revenue|total/i.test(k.label)) val = money(val);
+      else val = Number.isInteger(val) ? String(val) : val.toFixed(1);
+    }
+    return kpiTile(k.label, val, i === 0);
+  });
+  kpis.push(kpiTile("Rows", String(rows.length)));
 
-  const scope = params.category && params.category !== "ALL" ? params.category : "All categories";
+  const img = data.png_base64
+    ? `<div class="chartwrap"><img alt="${esc(report.title)}" src="data:image/png;base64,${data.png_base64}"/></div>` : "";
 
-  // Drill chips (distinct categories + all).
-  const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
-  const chips = allCats.map(c => {
-    const on = (params.category||"ALL") === c ? "on" : "";
-    const label = c === "ALL" ? "All categories" : c;
-    return `<div class="chip ${on}" data-cat="${c}">${label}</div>`;
-  }).join("");
+  // Generic table over whatever columns this report returned.
+  const head = `<tr>${cols.map(c => `<th class="${NUMCOL.test(c)?'num':''}">${esc(prettyCol(c))}</th>`).join("")}</tr>`;
+  const trs = rows.map(r => `<tr>${cols.map(c => `<td class="${NUMCOL.test(c)?'num':''}">${fmtCell(c, r[c])}</td>`).join("")}</tr>`).join("");
 
-  // Table.
-  const head = `<tr><th>Month</th><th>Category</th><th class="num">Revenue</th></tr>`;
-  const trs = rows.map(r => `<tr><td>${r.month}</td><td>${r.category}</td><td class="num">${money(r.revenue)}</td></tr>`).join("");
-
-  const img = data.png_base64 ? `<div class="chartwrap"><img alt="Revenue chart" src="data:image/png;base64,${data.png_base64}"/></div>` : "";
+  // Drill chips only for category-dimension reports.
+  let chipsHtml = "";
+  if(report.drill === "category"){
+    const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
+    chipsHtml = `<div class="chips">` + allCats.map(c => {
+      const on = (params.category||"ALL") === c ? "on" : "";
+      return `<div class="chip ${on}" data-cat="${c}">${c === "ALL" ? "All categories" : c}</div>`;
+    }).join("") + `</div>`;
+  }
 
   say.innerHTML = `
     <div style="margin-bottom:10px">${lead}</div>
     <div class="card">
       <div class="head">
         <div class="mark sm"></div>
-        <div><div class="t">Northwind revenue by category</div><div class="sub">${scope} · ${months.length} months · live from escurel</div></div>
+        <div><div class="t">${report.icon||""} ${esc(report.title)}</div><div class="sub">${rows.length} rows · 1997 · EMEA · live from escurel</div></div>
         <div class="badge">MCP App · live</div>
       </div>
-      <div class="kpis">
-        ${kpiTile("Total revenue", money(total), true)}
-        ${kpiTile("Categories", String(cats.length))}
-        ${kpiTile("Top category", top ? top[0] : "—")}
-      </div>
+      <div class="kpis">${kpis.join("")}</div>
       ${img}
-      <div class="chips">${chips}</div>
+      ${chipsHtml}
       <details class="tbl"><summary>Show data (${rows.length} rows)</summary>
         <div class="tablebox"><table>${head}${trs}</table></div>
       </details>
     </div>`;
 
-  // wire drill chips
-  say.querySelectorAll(".chip").forEach(ch => ch.addEventListener("click", () => drill(ch.dataset.cat)));
+  if(report.drill === "category")
+    say.querySelectorAll(".chip").forEach(ch => ch.addEventListener("click", () => drill(ch.dataset.cat)));
 
   // context sync indicator (the agent now "knows" the view state)
   ctxPill.style.display = "inline-flex";
-  ctxText.textContent = `Context · category = ${params.category||"ALL"}`;
+  const scope = params.category && params.category !== "ALL" ? " · " + params.category : "";
+  ctxText.textContent = `Context · ${currentReport.replace("northwind-","")}${scope}`;
 
   // The "under the hood" rail: show how this very rendering was produced.
   updateInspector(data.trace);
@@ -466,10 +496,10 @@ const brandSel = document.getElementById("brandSel");
 const hostSel = document.getElementById("hostSel");
 const pkTheme = document.getElementById("pk-theme");
 
-async function callRender(params){
+async function callRender(report, params){
   const res = await fetch("/v1/render_report", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ report_id: REPORT, params, png: true,
+    body: JSON.stringify({ report_id: report, params, png: true,
                            host: hostSel.value, brand: brandSel.value })
   });
   if(!res.ok){ const e = await res.json().catch(()=>({message:res.statusText})); throw new Error(e.message||"render failed"); }
@@ -480,27 +510,44 @@ async function callRender(params){
   return data;
 }
 
-// Re-render the current report when the company or host changes.
-let lastParams = null;
-function reTheme(){ if(lastParams) showReport(lastParams); }
+// Re-render the last report when the company or host changes.
+function reTheme(){ if(lastParams !== null) showReport(lastReport, lastParams); }
 brandSel.addEventListener("change", reTheme);
 hostSel.addEventListener("change", reTheme);
 
 function leadFor(data){
   const rows = data.structuredContent.rows || [];
-  const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
   const p = data.structuredContent.current_params || {};
-  if(p.category && p.category !== "ALL")
-    return `Here's <b>${p.category}</b> revenue across 1997 — it totalled <b>${money(total)}</b>. Tap another category to compare, or ask me a follow-up.`;
-  return `Here's <b>monthly revenue by product category</b> for 1997 (Northwind, EMEA). The full year came to <b>${money(total)}</b>. Tap a category to drill in.`;
+  switch(currentReport){
+    case "northwind-monthly-revenue": {
+      const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
+      if(p.category && p.category !== "ALL")
+        return `Here's <b>${p.category}</b> revenue across 1997 — <b>${money(total)}</b>. Tap another category to compare, or ask a follow-up.`;
+      return `Here's <b>monthly revenue by product category</b> for 1997 (Northwind, EMEA) — <b>${money(total)}</b> for the year. Tap a category to drill in.`;
+    }
+    case "northwind-top-products": {
+      const top = rows[0] || {};
+      return `Your <b>best-selling products</b> by net revenue. <b>${esc(top.product||"")}</b> leads with <b>${money(top.revenue||0)}</b>.`;
+    }
+    case "northwind-sales-by-country": {
+      const top = rows[0] || {};
+      return `<b>Revenue share by destination country.</b> <b>${esc(top.country||"")}</b> is the biggest market at <b>${money(top.revenue||0)}</b>.`;
+    }
+    case "northwind-seasonality":
+      return `A <b>month × category heatmap</b> — darker cells mean more revenue. Watch the seasonal peaks across 1997.`;
+    case "northwind-discount-vs-value":
+      return `<b>Discount % vs line revenue</b> — each bubble is an order line, sized by quantity. Does discounting drive bigger orders?`;
+    default:
+      return `Here's your report, rendered live from escurel.`;
+  }
 }
 
-async function showReport(params, userText){
-  lastParams = params;
+async function showReport(report, params, userText){
+  currentReport = report; lastReport = report; lastParams = params;
   if(userText) addUser(userText);
   const say = addBot(); typing(say);
   try {
-    const data = await callRender(params);
+    const data = await callRender(report, params);
     renderCard(say, data, leadFor(data));
     showQuick();
   } catch(e){
@@ -511,42 +558,55 @@ async function showReport(params, userText){
 
 async function drill(cat){
   const params = { ...currentParams, category: cat };
-  lastParams = params;
-  const label = cat === "ALL" ? "all categories" : cat;
-  addUser(`Show ${label}`);
+  lastParams = params; lastReport = currentReport;
+  addUser(`Show ${cat === "ALL" ? "all categories" : cat}`);
   const say = addBot(); typing(say);
   try {
-    const data = await callRender(params);
+    const data = await callRender(currentReport, params);
     renderCard(say, data, leadFor(data));
   } catch(e){ say.innerHTML = `Couldn't drill — <em>${e.message}</em>`; }
   scrollDown();
 }
 
+// Quick chips: jump between the scenarios (and category drill stays available
+// via the chips under the chart for category reports).
 function showQuick(){
   quick.innerHTML = "";
-  [["Filter to Beverages","Beverages"],["Filter to Seafood","Seafood"],["Back to all categories","ALL"]]
-    .forEach(([label,cat]) => {
-      const b = document.createElement("button"); b.textContent = label;
-      b.onclick = () => drill(cat); quick.appendChild(b);
-    });
+  const jumps = [
+    ["📊 Revenue",      "northwind-monthly-revenue",  { from:"1997-01-01", to:"1997-12-31", category:"ALL" }],
+    ["🏆 Top products", "northwind-top-products",     {}],
+    ["🌍 By country",   "northwind-sales-by-country", {}],
+    ["🔥 Seasonality",  "northwind-seasonality",      { category:"ALL" }],
+    ["💸 Discounts",    "northwind-discount-vs-value",{}],
+  ];
+  jumps.forEach(([label, report, params]) => {
+    const b = document.createElement("button"); b.textContent = label;
+    b.onclick = () => showReport(report, params, label.replace(/^\S+\s/, "Show "));
+    quick.appendChild(b);
+  });
 }
 
-// Intent routing — tiny keyword match so typing feels real.
+// Intent routing — a tiny keyword match standing in for an LLM agent picking
+// the report + params (the demo's deterministic "agent").
 function route(text){
   const t = text.toLowerCase();
+  if(/product|best.?sell|top.?sell|leaderboard/.test(t)) return { report:"northwind-top-products", params:{} };
+  if(/countr|geograph|region|where.*(sale|revenue|come|from)/.test(t)) return { report:"northwind-sales-by-country", params:{} };
+  if(/season|heat.?map|peak|month.*categor/.test(t)) return { report:"northwind-seasonality", params:{ category:"ALL" } };
+  if(/discount|order value|bigger order/.test(t)) return { report:"northwind-discount-vs-value", params:{} };
   const cat = ["beverages","condiments","dairy","produce","seafood"].find(c => t.includes(c));
   if(cat){
-    const map = {dairy:"Dairy Products"};
+    const map = { dairy:"Dairy Products" };
     const proper = map[cat] || cat[0].toUpperCase()+cat.slice(1);
-    return { params: { ...currentParams, category: proper } };
+    return { report:"northwind-monthly-revenue", params:{ from:"1997-01-01", to:"1997-12-31", category:proper } };
   }
-  return { params: { from:"1997-01-01", to:"1997-12-31", category:"ALL" } };
+  return { report:"northwind-monthly-revenue", params:{ from:"1997-01-01", to:"1997-12-31", category:"ALL" } };
 }
 
 function submit(text){
   if(!text.trim()) return;
-  const { params } = route(text);
-  showReport(params, text);
+  const { report, params } = route(text);
+  showReport(report, params, text);
 }
 
 sendBtn.onclick = () => { const v = input.value; input.value=""; submit(v); };
