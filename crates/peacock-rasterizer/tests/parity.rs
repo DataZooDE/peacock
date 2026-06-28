@@ -175,6 +175,42 @@ fn rect_heatmap_x_by_y_by_color() {
 }
 
 #[test]
+fn rect_heatmap_cells_are_filled_not_thin() {
+    // Regression: a band y-axis is built with an inverted range, so a naive
+    // bandwidth() goes negative and clamps to a 1px sliver — cells rendered as
+    // thin lines (the Northwind seasonality heatmap). Cells must have real
+    // height across the plot band.
+    let spec = json!({
+        "data": {"values": [
+            {"m": "Jan", "cat": "A", "v": 1.0}, {"m": "Feb", "cat": "B", "v": 2.0},
+            {"m": "Mar", "cat": "C", "v": 3.0}, {"m": "Apr", "cat": "D", "v": 4.0}
+        ]},
+        "mark": "rect",
+        "encoding": {
+            "x":     {"field": "m",   "type": "ordinal"},
+            "y":     {"field": "cat", "type": "nominal"},
+            "color": {"field": "v",   "type": "quantitative"}
+        }
+    });
+    let svg = render_vega_to_svg(&spec).expect("svg");
+    // Every cell-height attribute (skip the 12px legend swatches and the full
+    // background). With 4 category bands across ~344px the cell height is ~60px.
+    let tall = svg
+        .match_indices("height=\"")
+        .filter_map(|(i, _)| {
+            svg[i + 8..]
+                .split('"')
+                .next()
+                .and_then(|s| s.parse::<f64>().ok())
+        })
+        .any(|h| (20.0..200.0).contains(&h));
+    assert!(
+        tall,
+        "heatmap cells must be filled (real height), got thin slivers:\n{svg}"
+    );
+}
+
+#[test]
 fn tick_mark_emits_lines() {
     let spec = json!({
         "data": {"values": [

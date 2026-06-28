@@ -345,8 +345,11 @@ where
         (Some(x), Some(y)) => (x, y),
         _ => return,
     };
-    let bw = xband.bandwidth().max(1.0);
-    let bh = yband.bandwidth().max(1.0);
+    // The y band is built with an inverted range (top↔bottom), so its
+    // bandwidth is negative — take the magnitude, and place each cell on its
+    // band centre so the fill is correct regardless of axis orientation.
+    let bw = xband.bandwidth().abs().max(1.0);
+    let bh = yband.bandwidth().abs().max(1.0);
     let x_field = ctx
         .enc
         .x
@@ -382,8 +385,8 @@ where
         };
         let cv = c_field.as_ref().map(|f| data::cell_num(r.get(f)));
         let color = color_for(0, cv);
-        let x = xband.band_start(xi);
-        let y = yband.band_start(yi);
+        let x = xband.center(xi) - bw / 2.0;
+        let y = yband.center(yi) - bh / 2.0;
         rect(svg, x, y, bw, bh, &color, None);
     }
 }
