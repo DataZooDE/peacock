@@ -43,6 +43,27 @@ fn skill_query() -> String {
         .to_owned()
 }
 
+/// The skill saved/shared report instances are filed under (BRD §7). Mirrors
+/// `peacock_core::BOOKMARK_SKILL`. `visibility: owner` + `owner_field: owner`
+/// makes a bookmark create-able and readable only by the principal who saved
+/// it — peacock stamps the caller's `sub` into the instance's `owner` field.
+pub const BOOKMARK_SKILL: &str = "report_bookmark";
+
+/// The `report_bookmark` meta-skill (so saved-render instances validate and
+/// the owner ACL gates them to their creator).
+fn skill_bookmark() -> String {
+    "---\n\
+     type: skill\n\
+     id: report_bookmark\n\
+     description: A saved/shared parameterized render (bookmark).\n\
+     visibility: owner\n\
+     owner_field: owner\n\
+     ---\n\
+     # report_bookmark\n\
+     A persisted (report, params) bookmark; renders transiently via peacock.\n"
+        .to_owned()
+}
+
 /// The `nw_order_lines` sql_view skill, group-ACL `read: [sales]`, bound to
 /// the offline Parquet directory via the credential-free `parquet_dir`
 /// connector.
@@ -326,6 +347,7 @@ impl NorthwindEscurel {
         let fixtures = FixtureBuilder::new()
             .tenant(TENANT)
             .skill("query", skill_query())
+            .skill(BOOKMARK_SKILL, skill_bookmark())
             .skill("nw_order_lines", skill_order_lines(relation))
             .skill(NW_REPORT, skill_report())
             .skill(NW_REPORT_PRODUCTS, skill_report_products())

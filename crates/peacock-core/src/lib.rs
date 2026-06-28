@@ -14,6 +14,7 @@ pub mod compose;
 pub mod data;
 pub mod guardrail;
 pub mod render;
+pub mod saved;
 pub mod skill;
 
 pub use author::{
@@ -21,6 +22,7 @@ pub use author::{
 };
 pub use data::{Column, EscurelData, ReportData, RowSet};
 pub use render::{RenderOpts, render, render_a2ui_to_png, view_state_record};
+pub use saved::{BOOKMARK_SKILL, SavedRef, render_saved, resolve_saved_instance, save_instance};
 pub use skill::{Agg, ReportSkill, ReportSkills, ViewSpec};
 
 /// A sink that captures the **real** escurel-client wire payloads a render
