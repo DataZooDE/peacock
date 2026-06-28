@@ -21,7 +21,7 @@ pub use author::{
     AuthorError, parse_skill_markdown, scaffold, split_frontmatter, validate_skill_markdown,
 };
 pub use data::{Column, EscurelData, ReportData, RowSet};
-pub use render::{RenderOpts, render, render_a2ui_to_png, view_state_record};
+pub use render::{RenderOpts, promotable_selection, render, render_a2ui_to_png, view_state_record};
 pub use saved::{BOOKMARK_SKILL, SavedRef, render_saved, resolve_saved_instance, save_instance};
 pub use skill::{Agg, ReportSkill, ReportSkills, ViewSpec};
 
