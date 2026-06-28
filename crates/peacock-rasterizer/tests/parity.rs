@@ -688,6 +688,56 @@ fn label_angle_rotates_x_labels() {
 }
 
 #[test]
+fn crowded_x_labels_auto_rotate() {
+    // Many wide categorical labels can't fit flat in their bands — Vega-Lite
+    // auto-rotates them rather than overplotting. With 12 "1997-NN" months in a
+    // default-width chart, the flat labels collide, so we expect rotation even
+    // though the spec sets no labelAngle (regression: the demo's stacked bar).
+    let values: Vec<_> = (1..=12)
+        .map(|m| json!({"month": format!("1997-{m:02}"), "category": "Beverages", "revenue": (m * 100) as f64}))
+        .collect();
+    let spec = json!({
+        "mark": "bar",
+        "encoding": {
+            "x": {"field": "month", "type": "ordinal", "title": "Month"},
+            "y": {"field": "revenue", "type": "quantitative"},
+            "color": {"field": "category", "type": "nominal"}
+        },
+        "data": {"values": values}
+    });
+    let svg = render_vega_to_svg(&spec).expect("svg");
+    // The y-axis title is always rotate(-90); the x labels rotating is the
+    // signal — so look for a rotate that is NOT the -90 title, on a month text.
+    let x_rotations = svg.matches("rotate(").count() - svg.matches("rotate(-90").count();
+    assert!(
+        x_rotations >= 12,
+        "all 12 crowded month labels should auto-rotate, found {x_rotations} non-title rotations:\n{svg}"
+    );
+}
+
+#[test]
+fn sparse_x_labels_stay_flat() {
+    // A handful of short labels fit comfortably — no gratuitous rotation.
+    let spec = json!({
+        "mark": "bar",
+        "encoding": {
+            "x": {"field": "q", "type": "ordinal"},
+            "y": {"field": "v", "type": "quantitative"}
+        },
+        "data": {"values": [
+            {"q": "Q1", "v": 1.0}, {"q": "Q2", "v": 2.0},
+            {"q": "Q3", "v": 3.0}, {"q": "Q4", "v": 4.0}
+        ]}
+    });
+    let svg = render_vega_to_svg(&spec).expect("svg");
+    let x_rotations = svg.matches("rotate(").count() - svg.matches("rotate(-90").count();
+    assert_eq!(
+        x_rotations, 0,
+        "few short labels should stay flat (only the y-title may rotate -90):\n{svg}"
+    );
+}
+
+#[test]
 fn axis_format_percent() {
     let spec = json!({
         "data": {"values": [{"q": "Q1", "v": 0.5}]},

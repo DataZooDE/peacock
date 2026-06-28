@@ -63,7 +63,28 @@ pub(crate) fn draw_axes(
     }
 
     // --- X axis labels ---
-    let angle = x_ch.label_angle.unwrap_or(0.0);
+    // Honour an explicit labelAngle; otherwise auto-rotate when flat labels
+    // would overplot — i.e. the widest label is wider than its band step (the
+    // Northwind 12-month stacked bar). This mirrors Vega-Lite's default, which
+    // tilts crowded categorical labels rather than letting them collide.
+    let mut angle = x_ch.label_angle.unwrap_or(0.0);
+    let mut rotated = angle.abs() > 1.0;
+    if let Some(b) = band
+        && x_ch.label_angle.is_none()
+    {
+        let step = b.step();
+        let widest = x_cats
+            .iter()
+            .map(|l| svgutil::short_label(l).chars().count())
+            .max()
+            .unwrap_or(0) as f64
+            * 6.4; // ≈ glyph advance at font-size 11 (DejaVu Sans)
+        // Need ~6px of breathing room between adjacent labels; otherwise tilt.
+        if widest + 6.0 > step {
+            angle = -40.0;
+            rotated = true;
+        }
+    }
     if let Some(b) = band {
         for (i, label) in x_cats.iter().enumerate() {
             let cx = b.center(i);
@@ -94,11 +115,18 @@ pub(crate) fn draw_axes(
 
     // --- Axis titles ---
     if let Some(t) = x_ch.effective_title() {
+        // Rotated labels descend below the axis; drop the title to the frame
+        // foot so it clears them instead of overlapping.
+        let title_y = if rotated {
+            frame.height - 4.0
+        } else {
+            frame.height - 12.0
+        };
         let _ = write!(
             svg,
             r##"<text x="{:.1}" y="{:.1}" font-size="12" text-anchor="middle" fill="#222">{}</text>"##,
             (x0 + x1) / 2.0,
-            frame.height - 12.0,
+            title_y,
             escape(&t)
         );
     }
