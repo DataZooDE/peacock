@@ -109,6 +109,8 @@ async fn run(s: Settings) -> Result<(), String> {
         flutter_dir: None,
         flutter_app_url: None,
         themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
     });
 
     let addr: std::net::SocketAddr = s

@@ -36,6 +36,26 @@ pub async fn handle(
     Json(body): Json<Value>,
 ) -> Response {
     if let Some(tool) = headers.get("x-triton-tool").and_then(|v| v.to_str().ok()) {
+        // Capture the genuine inbound dispatch (the real headers Triton set and
+        // the args body) so the demo's inspector can show it verbatim — exactly
+        // what crossed the Triton→peacock wire.
+        if let Ok(mut slot) = state.upstream_capture.lock() {
+            let hdr = |k: &str| {
+                headers
+                    .get(k)
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned)
+            };
+            *slot = Some(json!({
+                "request": "POST / HTTP/1.1",
+                "headers": {
+                    "X-Triton-Tool": tool,
+                    "Authorization": hdr("authorization"),
+                    "Content-Type": hdr("content-type")
+                },
+                "body": body
+            }));
+        }
         return tool_call(&state, tool, body).await;
     }
     if let Some(op) = headers.get("x-triton-mcp").and_then(|v| v.to_str().ok()) {

@@ -18,6 +18,8 @@ async fn start() -> (NorthwindEscurel, String) {
         flutter_dir: None,
         flutter_app_url: None,
         themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -167,6 +169,8 @@ async fn start_with_flutter() -> (NorthwindEscurel, String, tempfile::TempDir) {
         flutter_dir: Some(dir.path().to_path_buf()),
         flutter_app_url: None,
         themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

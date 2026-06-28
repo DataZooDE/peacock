@@ -37,6 +37,16 @@ pub struct AppState {
     /// Theme registry: resolves `(brand, host)` to a corporate-identity ⊕
     /// host-look theme that styles both the chart PNG and the web surfaces.
     pub themes: peacock_rasterizer::ThemeRegistry,
+    /// Optional MCP endpoint of a **real** Triton in front of this peacock
+    /// (e.g. `http://127.0.0.1:NNN/`). When set, the demo render path mirrors
+    /// each render through Triton (`tools/call render_report`) so the inspector
+    /// can show the genuine Triton→peacock dispatch — not a reconstruction.
+    /// `None` (production, tests) skips the mirror.
+    pub triton_url: Option<String>,
+    /// The most recent **real** inbound request peacock received on `POST /`
+    /// from Triton (headers + body), captured by the upstream handler so the
+    /// render path can surface it in the inspector's Triton step.
+    pub upstream_capture: std::sync::Arc<std::sync::Mutex<Option<Value>>>,
 }
 
 /// Build the peacock HTTP router.
@@ -169,7 +179,15 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 .png
                 .as_ref()
                 .map(|p| base64::engine::general_purpose::STANDARD.encode(p));
-            let wire = sink.lock().map(|v| v.clone()).unwrap_or_default();
+            let mut wire = sink.lock().map(|v| v.clone()).unwrap_or_default();
+            // Mirror this render through the real Triton (when configured) so the
+            // inspector's Triton step shows the genuine inbound dispatch peacock
+            // received — captured, not reconstructed.
+            if let Some(req_capture) =
+                mirror_through_triton(&state, &req.report_id, &params, host, &brand).await
+            {
+                wire.push(json!({ "hop": "triton→peacock", "request": req_capture }));
+            }
             let trace = pipeline_trace(&req.report_id, host, &brand, &theme, &art, req.png, &wire);
             Json(json!({
                 "report_id": req.report_id,
@@ -188,6 +206,40 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
         }
         Err(e) => error_response(&e),
     }
+}
+
+/// Fire a genuine `tools/call render_report` at the configured real Triton so
+/// it dispatches to peacock's own `POST /` upstream — where the upstream handler
+/// captures the real inbound request (headers + body) into `upstream_capture`.
+/// Returns that captured request, or `None` when no Triton is wired or the
+/// round-trip fails (the inspector then simply omits the payload).
+async fn mirror_through_triton(
+    state: &AppState,
+    report_id: &str,
+    params: &Value,
+    host: &str,
+    brand: &str,
+) -> Option<Value> {
+    let triton_url = state.triton_url.as_ref()?;
+    // Clear any prior capture so we read this dispatch, not a stale one.
+    if let Ok(mut slot) = state.upstream_capture.lock() {
+        *slot = None;
+    }
+    let body = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "render_report", "arguments": {
+            "report_id": report_id, "params": params, "host": host, "brand": brand
+        }}
+    });
+    // Best-effort: a demo nicety, never load-bearing for the render itself.
+    let _ = reqwest::Client::new()
+        .post(triton_url)
+        .bearer_auth("dev-token")
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+    state.upstream_capture.lock().ok().and_then(|s| s.clone())
 }
 
 /// Describe the render pipeline that just ran as a cross-actor swimlane — what

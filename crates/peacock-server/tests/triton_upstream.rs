@@ -31,6 +31,8 @@ async fn start_peacock() -> (NorthwindEscurel, std::net::SocketAddr) {
         flutter_dir: None,
         flutter_app_url: None,
         themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

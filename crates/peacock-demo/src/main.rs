@@ -7,13 +7,44 @@
 //! table), and click a category to drill — every render goes through the real
 //! peacock render core against real escurel. No mocks.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use peacock_core::EscurelData;
 use peacock_server::{AppState, serve};
 use peacock_test_support::NorthwindEscurel;
+use triton_tests::TritonProcess;
 
 const DEMO_HTML: &str = include_str!("../assets/demo.html");
+
+/// Spawn a **real** Triton in front of peacock so the demo's render path can
+/// mirror each call through it and show the genuine Triton→peacock dispatch in
+/// the inspector. Returns `None` (and logs) when the `triton` binary isn't
+/// built — the demo still runs, the Triton step just omits its payload.
+async fn spawn_triton(peacock_addr: &str) -> Option<TritonProcess> {
+    let bin = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../triton/target/debug/triton");
+    if !bin.exists() {
+        eprintln!(
+            "peacock-demo: triton binary not found ({}); the inspector's Triton \
+             step will have no captured payload. Build it with `cargo build --bin \
+             triton` in ../triton to enable the real gateway hop.",
+            bin.display()
+        );
+        return None;
+    }
+    let env = HashMap::from([
+        ("TRITON_ENV".into(), "nonprod".into()),
+        (
+            "TRITON_STATIC_UPSTREAMS".into(),
+            format!("render_report={peacock_addr}"),
+        ),
+    ]);
+    let triton = TritonProcess::spawn_with_env(Duration::from_secs(15), env).await;
+    eprintln!("peacock-demo: real Triton up at {}", triton.mcp_url("/"));
+    Some(triton)
+}
 
 #[tokio::main]
 async fn main() {
@@ -43,6 +74,11 @@ async fn main() {
         .as_ref()
         .map(|_| format!("http://127.0.0.1:{port}/app/"));
 
+    // A real Triton in front of peacock (when its binary is built), so the
+    // inspector's Triton step shows a genuine captured dispatch.
+    let triton = spawn_triton(&format!("127.0.0.1:{port}")).await;
+    let triton_url = triton.as_ref().map(|t| t.mcp_url("/"));
+
     let state = Arc::new(AppState {
         escurel: EscurelData::new(nw.endpoint()),
         principal: nw.sales_principal(),
@@ -51,10 +87,13 @@ async fn main() {
         flutter_dir,
         flutter_app_url,
         themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url,
+        upstream_capture: Default::default(),
     });
 
     println!("\n  ✦ peacock demo ready → http://{addr}\n");
-    // Keep the escurel process alive for the server's lifetime.
+    // Keep the escurel + triton processes alive for the server's lifetime.
     let _escurel = nw;
+    let _triton = triton;
     serve(addr, state).await.expect("peacock-demo server");
 }

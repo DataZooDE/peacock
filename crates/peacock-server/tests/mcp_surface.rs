@@ -20,6 +20,8 @@ async fn start() -> (NorthwindEscurel, String) {
         flutter_dir: None,
         flutter_app_url: None,
         themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -131,6 +133,8 @@ async fn resources_read_serves_the_flutter_shim_when_app_url_is_set() {
         flutter_dir: None,
         flutter_app_url: Some("http://peacock.example/app/".into()),
         themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
