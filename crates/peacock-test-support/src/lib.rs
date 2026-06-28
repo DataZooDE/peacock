@@ -10,5 +10,7 @@
 mod northwind;
 mod process;
 
-pub use northwind::{NW_QUERY_REF, NW_REPORT, NorthwindEscurel, SALES_GROUP, TENANT};
+pub use northwind::{
+    BOOKMARK_SKILL, NW_QUERY_REF, NW_REPORT, NorthwindEscurel, SALES_GROUP, TENANT,
+};
 pub use process::PeacockProcess;
