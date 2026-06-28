@@ -45,19 +45,20 @@ jobs:
         with:
           path: peacock
 
+      # escurel and triton are public, so the default GITHUB_TOKEN clones them
+      # — no PAT/secret needed. (If either is ever made private, add a token
+      # with read access to both here.)
       - name: Checkout escurel (path dep)
         uses: actions/checkout@v4
         with:
           repository: DataZooDE/escurel
           path: escurel
-          token: ${{ secrets.DATAZOO_CI_TOKEN }}
 
       - name: Checkout triton (path dep)
         uses: actions/checkout@v4
         with:
           repository: DataZooDE/triton
           path: triton
-          token: ${{ secrets.DATAZOO_CI_TOKEN }}
 
       # rust-toolchain.toml (in peacock/) pins the channel + components.
       - name: Install Rust toolchain

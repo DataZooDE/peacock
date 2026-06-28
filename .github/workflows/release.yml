@@ -48,12 +48,21 @@ jobs:
         with:
           path: peacock
 
+      # escurel and triton are public — default GITHUB_TOKEN clones them, no
+      # secret needed. triton is needed because peacock-demo (a workspace
+      # member) path-depends on triton-tests, so cargo must resolve ../triton
+      # even when building only the peacock binary.
       - name: Checkout escurel (path dep)
         uses: actions/checkout@v4
         with:
           repository: DataZooDE/escurel
           path: escurel
-          token: ${{ secrets.DATAZOO_CI_TOKEN }}
+
+      - name: Checkout triton (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/triton
+          path: triton
 
       - name: Install Rust toolchain
         working-directory: peacock
