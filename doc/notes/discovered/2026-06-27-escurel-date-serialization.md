@@ -21,3 +21,9 @@ natively), so it is the right shape for the report anyway.
 projected a raw temporal type — wrap it in `strftime`/`::VARCHAR` in the
 query page's `sql`. peacock treats escurel rows as already-shaped for
 rendering (FR-D-4); shaping temporal columns is the query author's job.
+
+---
+**RESOLVED (escurel #211, commit 5e63007):** escurel now serializes
+DATE/TIME/TIMESTAMP/INTERVAL as ISO-8601 strings (a DATE → `"1997-01-01"`).
+peacock dropped the `strftime` workaround — the Northwind query projects
+`date_trunc('month', order_date)::DATE AS month` directly.

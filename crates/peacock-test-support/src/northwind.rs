@@ -61,7 +61,7 @@ fn query_revenue_by_category() -> String {
      \x20 - {name: from, type: date, required: true}\n\
      \x20 - {name: to, type: date, required: true}\n\
      \x20 - {name: category, type: text, required: true}\n\
-     sql: \"SELECT strftime(date_trunc('month', order_date), '%Y-%m-%d') AS month, category AS category, \
+     sql: \"SELECT date_trunc('month', order_date)::DATE AS month, category AS category, \
      sum(unit_price * quantity * (1 - discount))::DOUBLE AS revenue FROM {{target}} \
      WHERE order_date BETWEEN :from AND :to AND (:category = 'ALL' OR category = :category) \
      GROUP BY 1, 2 ORDER BY 1, 2\"\n\

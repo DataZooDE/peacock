@@ -192,12 +192,12 @@ impl ReportSkills for crate::data::EscurelData {
             .await
             .map_err(crate::data::map_err)?;
 
-        // Bare `[[id]]` resolves by slug across any namespace — a report skill
-        // page is matched by its unique id without constraining the `skill`
-        // column (escurel read.rs::resolve).
+        // `[[skill::<id>]]` resolves the skill page itself — escurel treats
+        // `skill::` as a reserved namespace meaning "the skill definition"
+        // (escurel #212).
         let resolved = client
             .resolve(ResolveRequest {
-                wikilink: format!("[[{report_id}]]"),
+                wikilink: format!("[[skill::{report_id}]]"),
                 scenario: String::new(),
             })
             .await
