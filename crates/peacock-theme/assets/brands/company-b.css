@@ -1,0 +1,9 @@
+/* "Beta B" corporate identity — warm orange, Georgia serif. */
+:root {
+  --pk-name: "Beta B";
+  --pk-font: "Georgia", "Times New Roman", serif;
+  --pk-brand: #e8590c;
+  --pk-accent: #f08c00;
+  --pk-cat-1: #e8590c; --pk-cat-2: #f08c00; --pk-cat-3: #f2a900;
+  --pk-cat-4: #c92a2a; --pk-cat-5: #ffa94d; --pk-cat-6: #a61e4d;
+}

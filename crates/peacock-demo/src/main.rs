@@ -50,6 +50,7 @@ async fn main() {
         demo_html: DEMO_HTML,
         flutter_dir,
         flutter_app_url,
+        themes: peacock_rasterizer::ThemeRegistry::builtin(),
     });
 
     println!("\n  ✦ peacock demo ready → http://{addr}\n");

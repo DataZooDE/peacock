@@ -108,6 +108,7 @@ async fn run(s: Settings) -> Result<(), String> {
                     POST /v1/render_report or /mcp.</p>",
         flutter_dir: None,
         flutter_app_url: None,
+        themes: peacock_rasterizer::ThemeRegistry::builtin(),
     });
 
     let addr: std::net::SocketAddr = s

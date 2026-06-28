@@ -21,6 +21,10 @@ pub struct RenderOpts {
     /// (the chat surface / embedded preview path, FR-C-2/FR-E-2). `None`
     /// skips rasterization; `Some(scale)` renders at `scale` ≥ 1.0.
     pub png_scale: Option<f32>,
+    /// Optional theme applied to the rasterized chart (corporate identity ⊕
+    /// host look). `None` renders peacock's stock palette. The matching CSS for
+    /// the web surfaces is attached at the service boundary, not here.
+    pub theme: Option<peacock_rasterizer::ThemeTokens>,
 }
 
 impl Default for RenderOpts {
@@ -28,6 +32,7 @@ impl Default for RenderOpts {
         Self {
             max_rows: DEFAULT_MAX_ROWS,
             png_scale: None,
+            theme: None,
         }
     }
 }
@@ -69,11 +74,15 @@ where
     // 4. Compose the one artifact (FR-R-3).
     let mut artifact = compose(&skill, &absolute, &rows, opts.max_rows)?;
 
-    // 5. Optionally rasterize the first chart to PNG (chat / embedded preview).
+    // 5. Optionally rasterize the first chart to PNG (chat / embedded preview),
+    //    themed with the resolved corporate identity ⊕ host look when set.
     if let Some(scale) = opts.png_scale
         && let Some(spec) = artifact.vega_specs.first()
     {
-        let png = peacock_rasterizer::render_vega_to_png(spec, scale)?;
+        let png = match &opts.theme {
+            Some(theme) => peacock_rasterizer::render_vega_to_png_themed(spec, scale, theme)?,
+            None => peacock_rasterizer::render_vega_to_png(spec, scale)?,
+        };
         artifact.png = Some(png);
     }
 

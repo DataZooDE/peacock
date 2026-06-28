@@ -18,6 +18,7 @@ path = "src/main.rs"
 peacock-types = { workspace = true }
 peacock-core = { workspace = true }
 peacock-server = { workspace = true }
+peacock-rasterizer = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

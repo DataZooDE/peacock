@@ -34,6 +34,9 @@ pub struct AppState {
     /// (the default, and required behind Triton's proxy where the host cannot
     /// reach the bundle) the `ui://` resource is the self-contained iframe.
     pub flutter_app_url: Option<String>,
+    /// Theme registry: resolves `(brand, host)` to a corporate-identity ⊕
+    /// host-look theme that styles both the chart PNG and the web surfaces.
+    pub themes: peacock_rasterizer::ThemeRegistry,
 }
 
 /// Build the peacock HTTP router.
@@ -116,11 +119,30 @@ struct RenderReq {
     /// Include a rasterized PNG of the chart (chat/demo path).
     #[serde(default)]
     png: bool,
+    /// The host the rendering is presented in (`copilot` / `whatsapp` /
+    /// `gemini`) — selects the host look-and-feel.
+    #[serde(default)]
+    host: Option<String>,
+    /// The company/brand whose corporate identity to apply. Defaults to the
+    /// caller's tenant.
+    #[serde(default)]
+    brand: Option<String>,
 }
 
 async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<RenderReq>) -> Response {
+    // Resolve the theme: corporate identity (brand, default = the caller's
+    // tenant) composed under the host look. The same theme styles the chart
+    // (tokens) and the web surfaces (CSS).
+    let host = req.host.as_deref().unwrap_or("");
+    let brand = req
+        .brand
+        .clone()
+        .unwrap_or_else(|| state.principal.tenant.clone());
+    let theme = state.themes.resolve(&brand, host);
+
     let opts = RenderOpts {
         png_scale: req.png.then_some(state.png_scale),
+        theme: Some(theme.tokens.clone()),
         ..Default::default()
     };
     let params = if req.params.is_null() {
@@ -149,6 +171,10 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 "structuredContent": art.structured_content,
                 "vega_specs": art.vega_specs,
                 "png_base64": png_b64,
+                // The matching CSS for web surfaces (host ⊕ brand). One theme,
+                // both the chart and the chrome.
+                "theme_css": theme.css,
+                "theme": { "host": theme.host, "brand": theme.brand },
             }))
             .into_response()
         }

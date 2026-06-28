@@ -9,12 +9,22 @@
 //! this replaces vl-convert.
 
 pub mod dashboard;
+mod logo;
 mod raster;
+mod theme_apply;
 mod vegalite;
+
+pub use logo::{brand_css_from_logo, palette_from_png};
 
 pub use dashboard::{DashboardRequest, render_dashboard_to_png, render_dashboard_to_svg};
 pub use raster::render_svg_to_png;
+pub use theme_apply::{
+    apply_chart_theme, apply_dashboard_theme, render_dashboard_to_png_themed,
+    render_vega_to_png_themed, render_vega_to_svg_themed,
+};
 pub use vegalite::vegalite_to_svg;
+// Re-export so callers thread a theme without a second `use`.
+pub use peacock_theme::{Theme, ThemeRegistry, ThemeTokens};
 
 use serde_json::Value;
 

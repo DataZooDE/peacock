@@ -1,0 +1,10 @@
+/* "Acme A" corporate identity — purple, Inter. Overrides only brand tokens, so
+   it inherits each host's chrome (background, density, radius). */
+:root {
+  --pk-name: "Acme A";
+  --pk-font: "Inter", "Segoe UI", system-ui, sans-serif;
+  --pk-brand: #6b3fa0;
+  --pk-accent: #a06bd0;
+  --pk-cat-1: #6b3fa0; --pk-cat-2: #a06bd0; --pk-cat-3: #c79ce0;
+  --pk-cat-4: #4b2c70; --pk-cat-5: #8456b8; --pk-cat-6: #d6b8ec;
+}

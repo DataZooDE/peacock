@@ -17,6 +17,7 @@ async fn start() -> (NorthwindEscurel, String) {
         demo_html: "<!doctype html><title>peacock demo</title>",
         flutter_dir: None,
         flutter_app_url: None,
+        themes: peacock_rasterizer::ThemeRegistry::builtin(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -74,6 +75,54 @@ async fn render_report_returns_artifact_and_png() {
 }
 
 #[tokio::test]
+async fn render_report_applies_theme_by_host_and_brand() {
+    // The same report, two corporate identities → matching theme CSS for the web
+    // surfaces and a visibly different chart PNG (corporate identity ⊕ host look).
+    let (nw, base) = start().await;
+    let client = reqwest::Client::new();
+
+    let fetch = |brand: &'static str, host: &'static str| {
+        let client = client.clone();
+        let base = base.clone();
+        async move {
+            client
+                .post(format!("{base}/v1/render_report"))
+                .json(&json!({ "report_id": NW_REPORT, "png": true, "host": host, "brand": brand }))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+
+    let a = fetch("company-a", "copilot").await;
+    let b = fetch("company-b", "gemini").await;
+
+    // The composed CSS (one source of truth for the web chrome) carries the
+    // brand colour and the host look.
+    assert!(
+        a["theme_css"].as_str().unwrap().contains("#6b3fa0"),
+        "Acme A purple in CSS"
+    );
+    assert!(
+        b["theme_css"].as_str().unwrap().contains("#e8590c"),
+        "Beta B orange in CSS"
+    );
+    assert_eq!(a["theme"]["brand"], "company-a");
+    assert_eq!(b["theme"]["host"], "gemini");
+
+    // The chart PNGs differ between brands (re-palette + background).
+    assert_ne!(
+        a["png_base64"].as_str().unwrap(),
+        b["png_base64"].as_str().unwrap(),
+        "different corporate identities render different charts"
+    );
+    nw.shutdown().await;
+}
+
+#[tokio::test]
 async fn drill_param_re_renders() {
     let (nw, base) = start().await;
     let client = reqwest::Client::new();
@@ -117,6 +166,7 @@ async fn start_with_flutter() -> (NorthwindEscurel, String, tempfile::TempDir) {
         demo_html: "<!doctype html><title>peacock demo</title>",
         flutter_dir: Some(dir.path().to_path_buf()),
         flutter_app_url: None,
+        themes: peacock_rasterizer::ThemeRegistry::builtin(),
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

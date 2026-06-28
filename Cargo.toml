@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/peacock-types",
+    "crates/peacock-theme",
     "crates/peacock-core",
     "crates/peacock-rasterizer",
     "crates/peacock-server",
@@ -26,6 +27,7 @@ unused_must_use = "deny"
 [workspace.dependencies]
 # Internal crates
 peacock-types = { path = "crates/peacock-types" }
+peacock-theme = { path = "crates/peacock-theme" }
 peacock-core = { path = "crates/peacock-core" }
 peacock-rasterizer = { path = "crates/peacock-rasterizer" }
 peacock-server = { path = "crates/peacock-server" }

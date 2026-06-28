@@ -1607,6 +1607,7 @@ dependencies = [
  "async-trait",
  "base64",
  "bytes",
+ "chrono",
  "duckdb",
  "escurel-crdt",
  "escurel-embed",
@@ -3766,6 +3767,7 @@ dependencies = [
  "axum",
  "clap",
  "peacock-core",
+ "peacock-rasterizer",
  "peacock-server",
  "peacock-test-support",
  "peacock-types",
@@ -3805,6 +3807,7 @@ name = "peacock-demo"
 version = "0.1.0"
 dependencies = [
  "peacock-core",
+ "peacock-rasterizer",
  "peacock-server",
  "peacock-test-support",
  "tokio",
@@ -3815,6 +3818,7 @@ dependencies = [
 name = "peacock-rasterizer"
 version = "0.1.0"
 dependencies = [
+ "peacock-theme",
  "peacock-types",
  "resvg",
  "serde",
@@ -3859,6 +3863,10 @@ dependencies = [
  "serde_json",
  "tokio",
 ]
+
+[[package]]
+name = "peacock-theme"
+version = "0.1.0"
 
 [[package]]
 name = "peacock-types"
