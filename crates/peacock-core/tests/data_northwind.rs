@@ -27,7 +27,12 @@ async fn reads_aggregated_revenue_by_category_for_1997() {
     let data = EscurelData::new(nw.endpoint());
 
     let rs = data
-        .query_view(NW_QUERY_REF, &params_1997_all(), &nw.sales_principal())
+        .query_view(
+            NW_QUERY_REF,
+            &params_1997_all(),
+            &nw.sales_principal(),
+            None,
+        )
         .await
         .expect("query_instance returns rows");
 
@@ -55,7 +60,7 @@ async fn drill_to_one_category_is_just_different_bound_params() {
 
     let drilled = json!({ "from": "1997-01-01", "to": "1997-12-31", "category": "Beverages" });
     let rs = data
-        .query_view(NW_QUERY_REF, &drilled, &nw.sales_principal())
+        .query_view(NW_QUERY_REF, &drilled, &nw.sales_principal(), None)
         .await
         .expect("drilled query");
 
@@ -81,7 +86,7 @@ async fn injection_value_is_bound_not_executed() {
         "category": "Beverages'; DROP TABLE pages; --"
     });
     let rs = data
-        .query_view(NW_QUERY_REF, &evil, &nw.sales_principal())
+        .query_view(NW_QUERY_REF, &evil, &nw.sales_principal(), None)
         .await
         .expect("injection value binds, does not error");
     assert!(
@@ -91,7 +96,12 @@ async fn injection_value_is_bound_not_executed() {
 
     // A legitimate value still works afterwards — escurel survived intact.
     let ok = data
-        .query_view(NW_QUERY_REF, &params_1997_all(), &nw.sales_principal())
+        .query_view(
+            NW_QUERY_REF,
+            &params_1997_all(),
+            &nw.sales_principal(),
+            None,
+        )
         .await
         .expect("escurel intact");
     assert_eq!(ok.rows.as_array().unwrap().len(), 16);
@@ -107,7 +117,12 @@ async fn acl_denial_is_a_typed_error_not_a_partial_read() {
     let data = EscurelData::new(nw.endpoint());
 
     let err = data
-        .query_view(NW_QUERY_REF, &params_1997_all(), &nw.no_sales_principal())
+        .query_view(
+            NW_QUERY_REF,
+            &params_1997_all(),
+            &nw.no_sales_principal(),
+            None,
+        )
         .await
         .expect_err("ACL must deny a non-sales principal");
 

@@ -16,3 +16,20 @@ pub mod skill;
 pub use data::{Column, EscurelData, ReportData, RowSet};
 pub use render::{RenderOpts, render, render_a2ui_to_png, view_state_record};
 pub use skill::{Agg, ReportSkill, ReportSkills, ViewSpec};
+
+/// A sink that captures the **real** escurel-client wire payloads a render
+/// issues (resolve + query_instance, request and response), so a surface can
+/// show exactly what crossed the wire — not a reconstruction. Optional; when
+/// `None` the data path records nothing. Each entry is a self-describing JSON
+/// event (`{ "hop", "request", "response", … }`).
+pub type TraceSink = std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
+
+/// Push one wire event into a sink, ignoring a poisoned lock (a trace is
+/// best-effort observability, never load-bearing).
+pub(crate) fn record(sink: Option<&TraceSink>, event: serde_json::Value) {
+    if let Some(s) = sink
+        && let Ok(mut v) = s.lock()
+    {
+        v.push(event);
+    }
+}

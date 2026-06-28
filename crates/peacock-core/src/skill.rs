@@ -181,12 +181,25 @@ fn parse_views(id: &str, fm: &Value) -> Result<Vec<ViewSpec>> {
 /// embedded face can supply its own escurel binding, FR-E-3).
 #[async_trait]
 pub trait ReportSkills: Send + Sync {
-    async fn resolve_report(&self, report_id: &str, principal: &Principal) -> Result<ReportSkill>;
+    /// Resolve + expand the report skill. When `trace` is `Some`, the **real**
+    /// resolve request and the literal frontmatter/body escurel returned are
+    /// recorded into it.
+    async fn resolve_report(
+        &self,
+        report_id: &str,
+        principal: &Principal,
+        trace: Option<&crate::TraceSink>,
+    ) -> Result<ReportSkill>;
 }
 
 #[async_trait]
 impl ReportSkills for crate::data::EscurelData {
-    async fn resolve_report(&self, report_id: &str, principal: &Principal) -> Result<ReportSkill> {
+    async fn resolve_report(
+        &self,
+        report_id: &str,
+        principal: &Principal,
+        trace: Option<&crate::TraceSink>,
+    ) -> Result<ReportSkill> {
         let token = SecretString::from(principal.raw_token.clone());
         let client = Client::connect(self.endpoint(), token)
             .await
@@ -195,9 +208,10 @@ impl ReportSkills for crate::data::EscurelData {
         // `[[skill::<id>]]` resolves the skill page itself — escurel treats
         // `skill::` as a reserved namespace meaning "the skill definition"
         // (escurel #212).
+        let wikilink = format!("[[skill::{report_id}]]");
         let resolved = client
             .resolve(ResolveRequest {
-                wikilink: format!("[[skill::{report_id}]]"),
+                wikilink: wikilink.clone(),
                 scenario: String::new(),
             })
             .await
@@ -213,6 +227,22 @@ impl ReportSkills for crate::data::EscurelData {
             })
             .await
             .map_err(crate::data::map_err)?;
+
+        // Record the genuine resolve/expand exchange — the verbatim frontmatter
+        // escurel released is what the report skill is parsed from.
+        crate::record(
+            trace,
+            serde_json::json!({
+                "hop": "peacock→escurel",
+                "method": "resolve + expand",
+                "request": { "wikilink": wikilink, "scenario": "" },
+                "response": {
+                    "page_id": page.page_id,
+                    "frontmatter": expanded.frontmatter,
+                    "body": expanded.body
+                }
+            }),
+        );
 
         ReportSkill::from_frontmatter(report_id, &expanded.frontmatter, &expanded.body)
     }

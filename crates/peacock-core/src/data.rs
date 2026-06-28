@@ -11,7 +11,9 @@ use async_trait::async_trait;
 use escurel_client::{Client, Error as EscError, QueryInstanceRequest};
 use peacock_types::{Error, Principal, Result};
 use secrecy::SecretString;
-use serde_json::Value;
+use serde_json::{Value, json};
+
+use crate::TraceSink;
 
 /// One column's name and escurel-reported type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,12 +37,14 @@ pub struct RowSet {
 #[async_trait]
 pub trait ReportData: Send + Sync {
     /// Read a structured data view by its query ref with the given typed
-    /// params, as the given principal.
+    /// params, as the given principal. When `trace` is `Some`, the **real**
+    /// request and response that crossed the escurel wire are recorded into it.
     async fn query_view(
         &self,
         query_ref: &str,
         params: &Value,
         principal: &Principal,
+        trace: Option<&TraceSink>,
     ) -> Result<RowSet>;
 }
 
@@ -73,6 +77,7 @@ impl ReportData for EscurelData {
         query_ref: &str,
         params: &Value,
         principal: &Principal,
+        trace: Option<&TraceSink>,
     ) -> Result<RowSet> {
         // Forward the caller's bearer per request (no ambient credential).
         let token = SecretString::from(principal.raw_token.clone());
@@ -88,7 +93,7 @@ impl ReportData for EscurelData {
             .await
             .map_err(map_err)?;
 
-        let schema = resp
+        let schema: Vec<Column> = resp
             .schema
             .into_iter()
             .map(|c| Column {
@@ -96,6 +101,23 @@ impl ReportData for EscurelData {
                 type_name: c.type_name,
             })
             .collect();
+
+        // Record the genuine wire payloads (the request peacock sent and the
+        // response escurel returned), for the inspector to show verbatim.
+        crate::record(
+            trace,
+            json!({
+                "hop": "peacock→escurel",
+                "method": "query_instance",
+                "request": { "query_ref": query_ref, "params": params },
+                "response": {
+                    "schema": schema.iter().map(|c| json!({ "name": c.name, "type": c.type_name })).collect::<Vec<_>>(),
+                    "row_count": resp.rows.as_array().map(Vec::len).unwrap_or(0),
+                    "rows": resp.rows,
+                    "truncated": resp.truncated
+                }
+            }),
+        );
 
         Ok(RowSet {
             rows: resp.rows,

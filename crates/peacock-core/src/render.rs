@@ -25,6 +25,11 @@ pub struct RenderOpts {
     /// host look). `None` renders peacock's stock palette. The matching CSS for
     /// the web surfaces is attached at the service boundary, not here.
     pub theme: Option<peacock_rasterizer::ThemeTokens>,
+    /// Optional sink capturing the **real** escurel wire payloads this render
+    /// issues (resolve + each query_instance, request and response). Used by the
+    /// demo's "under the hood" inspector to show genuine — not reconstructed —
+    /// traffic. `None` records nothing.
+    pub trace: Option<crate::TraceSink>,
 }
 
 impl Default for RenderOpts {
@@ -33,6 +38,7 @@ impl Default for RenderOpts {
             max_rows: DEFAULT_MAX_ROWS,
             png_scale: None,
             theme: None,
+            trace: None,
         }
     }
 }
@@ -51,7 +57,9 @@ where
     E: ReportData + ReportSkills,
 {
     // 1. Resolve the report skill (escurel resolve/expand).
-    let skill = escurel.resolve_report(report_id, principal).await?;
+    let skill = escurel
+        .resolve_report(report_id, principal, opts.trace.as_ref())
+        .await?;
 
     // 2. Validate params against the declared schema and fill defaults — the
     //    absolute parameter vector (FR-R-4, FR-X-2). Type mismatch ⇒ Validation.
@@ -67,7 +75,9 @@ where
     //    as prepared-statement parameters; peacock builds no SQL).
     let mut rows: BTreeMap<String, RowSet> = BTreeMap::new();
     for (alias, query_ref) in &skill.data {
-        let rs = escurel.query_view(query_ref, &bound, principal).await?;
+        let rs = escurel
+            .query_view(query_ref, &bound, principal, opts.trace.as_ref())
+            .await?;
         rows.insert(alias.clone(), rs);
     }
 

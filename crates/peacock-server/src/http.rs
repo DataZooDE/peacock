@@ -140,9 +140,13 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
         .unwrap_or_else(|| state.principal.tenant.clone());
     let theme = state.themes.resolve(&brand, host);
 
+    // Capture the genuine escurel wire payloads this render issues, so the
+    // inspector shows real traffic rather than a reconstruction.
+    let sink: peacock_core::TraceSink = Default::default();
     let opts = RenderOpts {
         png_scale: req.png.then_some(state.png_scale),
         theme: Some(theme.tokens.clone()),
+        trace: Some(sink.clone()),
         ..Default::default()
     };
     let params = if req.params.is_null() {
@@ -165,15 +169,8 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 .png
                 .as_ref()
                 .map(|p| base64::engine::general_purpose::STANDARD.encode(p));
-            let trace = pipeline_trace(
-                &req.report_id,
-                host,
-                &brand,
-                &theme,
-                &art,
-                req.png,
-                &state.principal,
-            );
+            let wire = sink.lock().map(|v| v.clone()).unwrap_or_default();
+            let trace = pipeline_trace(&req.report_id, host, &brand, &theme, &art, req.png, &wire);
             Json(json!({
                 "report_id": req.report_id,
                 "a2ui": art.a2ui,
@@ -205,7 +202,7 @@ fn pipeline_trace(
     theme: &peacock_rasterizer::Theme,
     art: &peacock_types::Artifact,
     png: bool,
-    principal: &Principal,
+    wire: &[Value],
 ) -> Value {
     let sc = &art.structured_content;
     let rows = sc.rows.as_array().map(Vec::len).unwrap_or(0);
@@ -233,72 +230,47 @@ fn pipeline_trace(
 
     let pretty = |v: &Value| serde_json::to_string_pretty(v).unwrap_or_default();
 
-    // --- Wire payloads for the cross-process hops (Triton, escurel) ---
+    // --- Genuine wire payloads captured during this render ---
+    // `wire` holds the real escurel-client exchanges (resolve + query_instance,
+    // request and response) recorded by peacock-core. We surface them verbatim.
+    let find = |needle: &str| {
+        wire.iter().find(|e| {
+            e.get("method")
+                .and_then(Value::as_str)
+                .map(|m| m.contains(needle))
+                .unwrap_or(false)
+        })
+    };
+    let part = |evt: Option<&Value>, key: &str| evt.and_then(|e| e.get(key)).map(pretty);
+    let resolve_evt = find("resolve");
+    let query_evt = find("query_instance");
+    let resolve_request = part(resolve_evt, "request");
+    let resolve_response = part(resolve_evt, "response");
+    let query_request = part(query_evt, "request");
+    let query_response = part(query_evt, "response");
 
-    // Triton → peacock: the HTTP request peacock receives (the static-upstream
-    // contract), plus the principal Triton minted from the OIDC token.
-    let triton_request = pretty(&json!({
-        "request": "POST / HTTP/1.1",
-        "headers": {
-            "X-Triton-Tool": "render_report",
-            "Authorization": "Bearer <OIDC-minted JWT>",
-            "Content-Type": "application/json"
-        },
-        "principal": {
-            "sub": principal.sub, "tenant": principal.tenant,
-            "groups": principal.groups, "scopes": principal.scopes
-        },
-        "body": { "report_id": report_id, "params": sc.current_params, "host": host, "brand": brand }
-    }));
-
-    // peacock → escurel: the escurel-client resolve request, and a sketch of the
-    // resolved skill it returns (the real view kinds peacock composed from).
-    let resolve_request = pretty(&json!({
-        "method": "resolve",
-        "wikilink": format!("[[skill::{report_id}]]"),
-        "scenario": ""
-    }));
-    let resolve_response = pretty(&json!({
-        "page_id": format!("skill::{report_id}"),
-        "frontmatter": {
-            "render": "a2ui",
-            "views": kinds,
-            "note": "+ params schema, data refs ([[query::…]]), named Vega-Lite specs"
-        },
-        "body": "the agent-authored narrative (skill body)"
-    }));
-
-    // peacock → escurel: the query_instance request (typed params, no SQL) and
-    // the real response — schema + the first rows + the row count escurel returned.
-    let query_request = pretty(&json!({
-        "method": "query_instance",
-        "params": sc.current_params,
-        "note": "the view id is resolved from the report's data binding; :params are bound as prepared-statement values"
-    }));
-    let row_sample: Vec<Value> = sc
-        .rows
-        .as_array()
-        .map(|r| r.iter().take(6).cloned().collect())
-        .unwrap_or_default();
-    let columns: Vec<String> = row_sample
-        .first()
-        .and_then(Value::as_object)
-        .map(|o| o.keys().cloned().collect())
-        .unwrap_or_default();
-    let query_response = pretty(&json!({
-        "schema": columns,
-        "rows": row_sample,
-        "row_count": rows,
-        "truncated": false,
-        "note": if rows > 6 { "first 6 of N rows shown" } else { "all rows shown" }
-    }));
-
-    // Triton → agent/host: the canonical envelope Triton relays back.
+    // Triton → agent/host: the canonical envelope built from the REAL artifact
+    // (component kinds, structuredContent, the ui:// resource) Triton relays back.
     let relay_payload = pretty(&json!({
         "surface": { "components": kinds.iter().map(|k| json!({ "kind": k })).collect::<Vec<_>>() },
         "structuredContent": { "row_count": rows, "current_params": sc.current_params },
         "_meta": { "ui": { "resourceUri": format!("ui://peacock/{report_id}") } }
     }));
+
+    // The compact view-state record (real params + a real one-line summary).
+    let summary = format!("{rows} rows for {}", sc.current_params);
+    let state_record = pretty(&json!({
+        "report_id": report_id, "params": sc.current_params, "salient_summary": summary
+    }));
+
+    // Identifies whether the Triton hop is real (captured) or descriptive: the
+    // demo populates step 3's payload from a genuine Triton-routed request when
+    // available (see `wire` entries tagged "triton").
+    let triton_request = wire
+        .iter()
+        .find(|e| e.get("hop").and_then(Value::as_str) == Some("triton→peacock"))
+        .and_then(|e| e.get("request"))
+        .map(pretty);
 
     json!([
         {
@@ -309,7 +281,7 @@ fn pipeline_trace(
         {
             "n": 2, "actor": "agent", "kind": "plan", "title": "Plan + call tool",
             "protocol": "MCP", "wire": "MCP tools/call → the MCP gateway (Triton)",
-            "detail": "the agent picks the report and calls the render_report tool with absolute params",
+            "detail": "the agent picks the report and calls the render_report tool with absolute params (demo: a deterministic stand-in for the LLM)",
             "code": serde_json::to_string_pretty(&json!({
                 "name": "render_report",
                 "arguments": { "report_id": report_id, "params": sc.current_params, "host": host, "brand": brand }
@@ -328,9 +300,9 @@ fn pipeline_trace(
             "code": resolve_request
         },
         {
-            "n": 5, "actor": "escurel", "kind": "data", "title": "resolve(skill)",
-            "protocol": "HTTP", "wire": "escurel-client resolve response (HTTP/JSON)",
-            "detail": "returns the report skill: params schema, data refs, view layout, chart specs",
+            "n": 5, "actor": "escurel", "kind": "data", "title": "resolve + expand",
+            "protocol": "HTTP", "wire": "escurel-client response (HTTP/JSON) — the literal frontmatter",
+            "detail": "returns the report skill verbatim: render kind, params schema, data refs, views, chart specs, narrative",
             "code": resolve_response
         },
         {
@@ -382,9 +354,7 @@ fn pipeline_trace(
             "n": 14, "actor": "agent", "kind": "state", "title": "updateModelContext (FR-X)",
             "protocol": "MCP", "wire": "MCP-Apps updateModelContext (compact view-state record)",
             "detail": "view state = the absolute parameter vector; the agent keeps a compact {report_id, params, summary} — no rows. peacock stays stateless.",
-            "code": serde_json::to_string_pretty(&json!({
-                "report_id": report_id, "params": sc.current_params, "salient_summary": "…"
-            })).unwrap_or_default()
+            "code": state_record
         },
         {
             "n": 15, "actor": "frontend", "kind": "render", "title": "Render the card",
