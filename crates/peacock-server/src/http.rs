@@ -185,9 +185,11 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
     }
 }
 
-/// Describe the render pipeline that just ran, step by step — what the demo's
-/// "under the hood" inspector shows. Each step carries a `kind` (for styling), a
-/// title, a one-line `detail`, and optional `code` (JSON/CSS) to expand.
+/// Describe the render pipeline that just ran as a cross-actor swimlane — what
+/// the demo's "under the hood" inspector shows. Each step names the **actor**
+/// that performs it (frontend · agent · triton · peacock · escurel), so a viewer
+/// can see who does what and where state is handed off. Steps also carry a
+/// `kind` (badge), a title, a one-line `detail`, and optional `code` to expand.
 fn pipeline_trace(
     report_id: &str,
     host: &str,
@@ -198,6 +200,12 @@ fn pipeline_trace(
 ) -> Value {
     let sc = &art.structured_content;
     let rows = sc.rows.as_array().map(Vec::len).unwrap_or(0);
+    let host_name = match host {
+        "whatsapp" => "WhatsApp",
+        "gemini" => "Gemini",
+        "copilot" | "" => "Copilot",
+        other => other,
+    };
     let kinds: Vec<&str> = art
         .a2ui
         .get("components")
@@ -214,51 +222,78 @@ fn pipeline_trace(
         .and_then(|m| m.as_str().or_else(|| m.get("type").and_then(Value::as_str)))
         .unwrap_or("—");
 
+    let params_pretty = serde_json::to_string_pretty(&sc.current_params).unwrap_or_default();
+
     json!([
         {
-            "n": 1, "kind": "tool", "title": "Tool call · render_report",
-            "detail": format!("host = {host} · brand = {brand}"),
+            "n": 1, "actor": "frontend", "kind": "ask", "title": "User asks",
+            "detail": format!("a question is typed into the {host_name} chat and handed to the agent")
+        },
+        {
+            "n": 2, "actor": "agent", "kind": "plan", "title": "Plan + call tool",
+            "detail": "the agent picks the report and calls the render_report tool with absolute params",
             "code": serde_json::to_string_pretty(&json!({
                 "name": "render_report",
                 "arguments": { "report_id": report_id, "params": sc.current_params, "host": host, "brand": brand }
             })).unwrap_or_default()
         },
         {
-            "n": 2, "kind": "data", "title": "escurel · resolve(skill)",
-            "detail": format!("[[skill::{report_id}]] → report skill (params schema, data refs, views)")
+            "n": 3, "actor": "triton", "kind": "route", "title": "Authorize + dispatch",
+            "detail": "terminates TLS/OIDC, mints the principal, routes to the peacock upstream (POST / · X-Triton-Tool: render_report · Bearer)"
         },
         {
-            "n": 3, "kind": "data", "title": "escurel · query_instance(view, params)",
-            "detail": format!("{rows} access-checked rows · params bound as prepared-statement values (peacock builds no SQL, holds no DSN)"),
-            "code": serde_json::to_string_pretty(&sc.current_params).unwrap_or_default()
+            "n": 4, "actor": "peacock", "kind": "resolve", "title": "Resolve report skill",
+            "detail": format!("asks escurel for [[skill::{report_id}]] — peacock holds no DSN, no DB driver")
         },
         {
-            "n": 4, "kind": "compose", "title": "Compose A2UI v0.9",
+            "n": 5, "actor": "escurel", "kind": "data", "title": "resolve(skill)",
+            "detail": "returns the report skill: params schema, data refs, view layout, chart specs"
+        },
+        {
+            "n": 6, "actor": "peacock", "kind": "read", "title": "Read rows",
+            "detail": "calls query_instance(view, params) — untrusted params travel as typed values, peacock builds no SQL string"
+        },
+        {
+            "n": 7, "actor": "escurel", "kind": "data", "title": "query_instance",
+            "detail": format!("{rows} access-checked rows · :params bound as prepared-statement values · ACL enforced here (the only data path)"),
+            "code": params_pretty
+        },
+        {
+            "n": 8, "actor": "peacock", "kind": "compose", "title": "Compose A2UI v0.9",
             "detail": format!("layout components: {}", if kinds.is_empty() { "—".into() } else { kinds.join(", ") })
         },
         {
-            "n": 5, "kind": "guardrail", "title": "Render guardrail",
+            "n": 9, "actor": "peacock", "kind": "guardrail", "title": "Render guardrail",
             "detail": "inline-data-only · no remote data.url · no expr/signal — an agent-authored spec can't fetch or compute beyond its rows ✓"
         },
         {
-            "n": 6, "kind": "vega", "title": format!("Vega-Lite spec · mark “{mark}” (rows injected inline)"),
+            "n": 10, "actor": "peacock", "kind": "vega", "title": format!("Vega-Lite spec · mark “{mark}”"),
+            "detail": "the named chart spec with the rows injected inline",
             "code": serde_json::to_string_pretty(&vega).unwrap_or_default()
         },
         {
-            "n": 7, "kind": "theme", "title": format!("Theme · {brand} ⊕ {host}"),
+            "n": 11, "actor": "peacock", "kind": "theme", "title": format!("Theme · {brand} ⊕ {host}"),
             "detail": "one CSS source styles the chart tokens AND the web chrome",
             "code": theme.css.trim().to_string()
         },
         {
-            "n": 8, "kind": "raster", "title": "Rasterize → PNG",
-            "detail": if png { "pure-Rust Vega-Lite → SVG → PNG (resvg/tiny-skia, no Node/Deno/network)" } else { "(not requested)" }
+            "n": 12, "actor": "peacock", "kind": "raster", "title": "Rasterize → PNG",
+            "detail": if png { "pure-Rust Vega-Lite → SVG → PNG (resvg/tiny-skia, no Node/Deno/network)" } else { "(PNG not requested on this surface)" }
         },
         {
-            "n": 9, "kind": "state", "title": "State transfer (FR-X)",
-            "detail": "view state = the absolute parameter vector; pushed to the model via updateModelContext {report_id, params, summary} — compact, no rows. peacock stays stateless.",
+            "n": 13, "actor": "triton", "kind": "relay", "title": "Relay surface",
+            "detail": "passes the A2UI surface + structuredContent + the ui:// resource back toward the agent and host"
+        },
+        {
+            "n": 14, "actor": "agent", "kind": "state", "title": "updateModelContext (FR-X)",
+            "detail": "view state = the absolute parameter vector; the agent keeps a compact {report_id, params, summary} — no rows. peacock stays stateless.",
             "code": serde_json::to_string_pretty(&json!({
                 "report_id": report_id, "params": sc.current_params, "salient_summary": "…"
             })).unwrap_or_default()
+        },
+        {
+            "n": 15, "actor": "frontend", "kind": "render", "title": "Render the card",
+            "detail": format!("{host_name} paints the themed report; a drill or follow-up loops back to the agent (step 2)")
         }
     ])
 }

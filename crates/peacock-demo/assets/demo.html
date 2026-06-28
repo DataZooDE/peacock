@@ -146,45 +146,64 @@
   .switch select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 8px;
     border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; }
 
-  /* "Under the hood" inspector — the render pipeline beside the chat. Hidden on
-     narrow screens; on wide ones it's a fixed right rail and the chat reserves
-     space for it (body padding-right + composer offset below). */
-  #inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 460px; z-index: 6;
+  /* "Under the hood" inspector — the render pipeline as a cross-actor swimlane:
+     columns are the architecture actors (frontend · agent · triton · peacock ·
+     escurel), the timeline runs top→bottom, and each step sits in the lane of
+     whoever performs it, so the hand-offs of work and state are visible. Hidden
+     on narrow screens; on wide ones it's a fixed right rail and the chat
+     reserves space for it (body padding-right + composer offset below). */
+  #inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 560px; z-index: 6;
     background: var(--panel); border-left: 1px solid var(--line-strong);
     display: none; flex-direction: column; box-shadow: -8px 0 24px rgba(0,0,0,.04); }
-  .insp-head { padding: 15px 18px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .insp-head { padding: 14px 16px 11px; border-bottom: 1px solid var(--line); background: var(--panel); }
   .insp-title { font-weight: 700; font-size: 13.5px; letter-spacing: .2px; }
   .insp-title::before { content: "⚙  "; }
   .insp-sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 4px; line-height: 1.45; }
-  .insteps { overflow-y: auto; padding: 10px 18px 32px; flex: 1; }
+  .insteps { overflow-y: auto; padding: 0 14px 32px; flex: 1; }
   .insp-empty { color: var(--ink-faint); font-size: 12.5px; padding: 30px 6px; text-align: center; line-height: 1.5; }
-  .istep { position: relative; padding: 8px 0 15px 22px; }
-  .istep::before { content: ""; position: absolute; left: 5px; top: 14px; bottom: -3px; width: 2px; background: var(--line-strong); }
-  .istep:last-child::before { display: none; }
-  .istep .dot { position: absolute; left: 0; top: 9px; width: 12px; height: 12px; border-radius: 50%;
-    background: #fff; border: 2px solid var(--accent); }
-  .istep .t { font-size: 12.5px; font-weight: 600; line-height: 1.35; }
-  .istep .n { color: var(--ink-faint); font-weight: 700; margin-right: 5px; }
-  .istep .d { font-size: 11.5px; color: var(--ink-soft); margin-top: 4px; line-height: 1.5; }
-  .kind { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
-    padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: 1px; }
-  .k-tool{background:#eef6fc;color:#0f6cbd} .k-data{background:#eef7e8;color:#3b6e22}
-  .k-compose{background:#f3eefc;color:#6b3fa0} .k-guardrail{background:#fdeeee;color:#c4314b}
-  .k-vega{background:#e9f7f5;color:#0a7d77} .k-theme{background:#fdf0f7;color:#b3367f}
-  .k-raster{background:#fff4e6;color:#b5650b} .k-state{background:#eef2f7;color:#3a5a8c}
-  .istep details { margin-top: 7px; }
-  .istep summary { cursor: pointer; font-size: 11px; color: var(--accent); user-select: none;
+
+  /* Per-actor accent colour, shared by the lane header and its step cards. */
+  .a-frontend { --ac: #2563eb; } .a-agent { --ac: #7c3aed; } .a-triton { --ac: #d97706; }
+  .a-peacock  { --ac: #db2777; } .a-escurel { --ac: #059669; }
+
+  /* Sticky lane headers (the columns). */
+  .swim-head { display: grid; grid-template-columns: repeat(5, 1fr); position: sticky; top: 0; z-index: 3;
+    background: var(--panel); padding: 10px 0 0; border-bottom: 1px solid var(--line); }
+  .swim-head .ah { text-align: center; font-size: 10.5px; font-weight: 700; color: var(--ink);
+    margin: 0 3px; padding-bottom: 6px; border-bottom: 2.5px solid var(--ac); }
+  .swim-head .ah small { display: block; font-weight: 500; font-size: 8.5px; color: var(--ink-faint); margin-top: 2px; }
+
+  /* The lane grid: 5 columns with faint vertical rails at the boundaries. */
+  .swim { display: grid; grid-template-columns: repeat(5, 1fr); grid-auto-rows: min-content;
+    padding-top: 12px;
+    background: repeating-linear-gradient(to right,
+      transparent 0 calc(20% - 1px), var(--line-strong) calc(20% - 1px) 20%); }
+
+  .scard { margin: 0 3px 12px; background: #fff; border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--ac); border-radius: 9px; padding: 7px 8px 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05); min-width: 0; }
+  .scard .sc-top { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; }
+  .scard .sc-n { font-size: 9.5px; font-weight: 700; color: #fff; background: var(--ac);
+    width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .scard .sc-kind { font-size: 8px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+    color: var(--ac); overflow: hidden; text-overflow: ellipsis; }
+  .scard .sc-title { font-size: 11px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+  .scard .sc-detail { font-size: 10px; color: var(--ink-soft); line-height: 1.4; margin-top: 3px; overflow-wrap: anywhere; }
+
+  /* Payloads break out to the full panel width (legible JSON/CSS). */
+  .scard-pl { grid-column: 1 / -1; margin: -6px 3px 14px; }
+  .scard-pl summary { cursor: pointer; font-size: 10.5px; color: var(--accent); user-select: none;
     list-style: none; display: inline-flex; align-items: center; gap: 5px; }
-  .istep summary::-webkit-details-marker { display: none; }
-  .istep summary::before { content: "▸"; font-size: 9px; }
-  .istep details[open] summary::before { content: "▾"; }
-  .istep pre { margin: 6px 0 0; background: #1f2430; color: #d7dce5; font-size: 10.5px; line-height: 1.45;
+  .scard-pl summary::-webkit-details-marker { display: none; }
+  .scard-pl summary::before { content: "▸"; font-size: 9px; }
+  .scard-pl[open] summary::before { content: "▾"; }
+  .scard-pl pre { margin: 6px 0 0; background: #1f2430; color: #d7dce5; font-size: 10.5px; line-height: 1.45;
     border-radius: 8px; padding: 9px 11px; overflow: auto; max-height: 240px; white-space: pre;
     font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 
-  @media (min-width: 1180px) {
-    body { padding-right: 460px; }
-    .composer { right: 460px; }
+  @media (min-width: 1240px) {
+    body { padding-right: 560px; }
+    .composer { right: 560px; }
     #inspector { display: flex; }
   }
 </style>
@@ -238,10 +257,12 @@
   <aside id="inspector">
     <div class="insp-head">
       <div class="insp-title">Under the hood</div>
-      <div class="insp-sub">How peacock turns your question into this report — every step in the render pipeline, with the real payloads it passed along.</div>
+      <div class="insp-sub">Who does what across the architecture. Columns are the actors; the timeline runs top→bottom, each step in the lane of whoever performs it.</div>
     </div>
     <div id="insteps" class="insteps">
-      <div class="insp-empty">Ask a question, and the render pipeline — tool call → escurel data → A2UI → Vega-Lite → theme → PNG → state transfer — will appear here, step by step.</div>
+      <div class="swim-head" id="swimHead"></div>
+      <div class="swim" id="swimBody"></div>
+      <div class="insp-empty" id="swimEmpty">Ask a question, and the pipeline — agent → triton → peacock ⇄ escurel → back to the frontend — will appear here, step by step.</div>
     </div>
   </aside>
 
@@ -273,18 +294,37 @@ let currentParams = { from: "1997-01-01", to: "1997-12-31", category: "ALL" };
 const money = n => "$" + Number(n).toLocaleString("en-US", {maximumFractionDigits:0});
 const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
 
-// Render the server-provided pipeline trace into the inspector rail, so an
-// interested viewer can see exactly how the rendering was produced.
+// The architecture actors, left→right, that own the inspector's lanes.
+const ACTORS = [
+  { key: "frontend", name: "Frontend", sub: "Copilot · WhatsApp" },
+  { key: "agent",    name: "Agent",    sub: "e.g. anofox" },
+  { key: "triton",   name: "Triton",   sub: "gateway" },
+  { key: "peacock",  name: "peacock",  sub: "renderer" },
+  { key: "escurel",  name: "escurel",  sub: "data" },
+];
+
+// Render the server-provided pipeline trace as a cross-actor swimlane, so an
+// interested viewer sees who does what and where state is handed off.
 function updateInspector(trace){
-  const el = document.getElementById("insteps");
   if(!trace || !trace.length){ return; }
-  el.innerHTML = trace.map(s => `
-    <div class="istep">
-      <div class="dot"></div>
-      <div class="t"><span class="n">${s.n}</span>${esc(s.title)}<span class="kind k-${s.kind}">${esc(s.kind)}</span></div>
-      ${s.detail ? `<div class="d">${esc(s.detail)}</div>` : ""}
-      ${s.code ? `<details><summary>payload</summary><pre>${esc(s.code)}</pre></details>` : ""}
-    </div>`).join("");
+  document.getElementById("swimEmpty").style.display = "none";
+  document.getElementById("swimHead").innerHTML =
+    ACTORS.map(a => `<div class="ah a-${a.key}">${a.name}<small>${a.sub}</small></div>`).join("");
+  const colOf = k => Math.max(0, ACTORS.findIndex(a => a.key === k)) + 1;
+  let row = 1, html = "";
+  trace.forEach(s => {
+    html += `<div class="scard a-${s.actor}" style="grid-column:${colOf(s.actor)};grid-row:${row}">
+        <div class="sc-top"><span class="sc-n">${s.n}</span><span class="sc-kind">${esc(s.kind)}</span></div>
+        <div class="sc-title">${esc(s.title)}</div>
+        ${s.detail ? `<div class="sc-detail">${esc(s.detail)}</div>` : ""}
+      </div>`;
+    row++;
+    if(s.code){
+      html += `<details class="scard-pl" style="grid-row:${row}"><summary>payload — ${esc(s.actor)}</summary><pre>${esc(s.code)}</pre></details>`;
+      row++;
+    }
+  });
+  document.getElementById("swimBody").innerHTML = html;
 }
 
 function scrollDown(){ window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }
