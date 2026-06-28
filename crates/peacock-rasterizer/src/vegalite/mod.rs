@@ -23,6 +23,9 @@ use serde_json::Value;
 
 use crate::RasterError;
 
+/// Set the per-thread brand sequential ramp used by the themed render path.
+pub(crate) use scales::set_sequential_override;
+
 /// Outer canvas defaults.
 pub(crate) const DEFAULT_W: f64 = 680.0;
 pub(crate) const DEFAULT_H: f64 = 420.0;

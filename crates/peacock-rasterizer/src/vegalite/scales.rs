@@ -260,14 +260,35 @@ const GREENS: &[(u8, u8, u8)] = &[
     (0, 68, 27),
 ];
 
-/// Interpolate a sequential colour at `t` in `[0,1]` for the named scheme.
+thread_local! {
+    /// A brand-derived sequential ramp set by the themed render path; when
+    /// present it overrides the named scheme so heatmaps/continuous colour pick
+    /// up the corporate hue. Thread-local because a render is synchronous on one
+    /// thread, and it keeps the theme out of every function signature.
+    static SEQ_OVERRIDE: std::cell::RefCell<Option<Vec<(u8, u8, u8)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Set (or clear) the brand sequential ramp for the current thread.
+pub fn set_sequential_override(ramp: Option<Vec<(u8, u8, u8)>>) {
+    SEQ_OVERRIDE.with(|s| *s.borrow_mut() = ramp);
+}
+
+/// Interpolate a sequential colour at `t` in `[0,1]`: a brand override if set,
+/// else the named scheme.
 pub fn sequential_color(scheme: Option<&str>, t: f64) -> String {
-    let ramp: &[(u8, u8, u8)] = match scheme {
+    let override_ramp = SEQ_OVERRIDE.with(|s| s.borrow().clone());
+    let named: &[(u8, u8, u8)] = match scheme {
         Some("blues") => BLUES,
         Some("greens") => GREENS,
         Some("magma") | Some("inferno") | Some("plasma") => MAGMA,
         _ => VIRIDIS,
     };
+    let ramp: &[(u8, u8, u8)] = override_ramp.as_deref().unwrap_or(named);
+    if ramp.len() < 2 {
+        let (r, g, b) = ramp.first().copied().unwrap_or((0, 0, 0));
+        return format!("#{r:02x}{g:02x}{b:02x}");
+    }
     let t = t.clamp(0.0, 1.0);
     let seg = (ramp.len() - 1) as f64;
     let pos = t * seg;

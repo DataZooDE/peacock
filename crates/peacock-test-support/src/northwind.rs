@@ -88,14 +88,20 @@ data:
   rev_by_cat: "[[query::nw_revenue_by_category]]"
 views:
   - { kind: kpi,   data: rev_by_cat, agg: sum, field: revenue, label: "Total revenue" }
-  - { kind: vega,  data: rev_by_cat, spec: rev_line }
+  - { kind: vega,  data: rev_by_cat, spec: rev_bar, spec_single: rev_line }
   - { kind: table, data: rev_by_cat }
 specs:
+  rev_bar:
+    mark: bar
+    encoding:
+      x:     { field: month,    type: ordinal,      title: Month }
+      y:     { field: revenue,  type: quantitative, aggregate: sum, title: Revenue }
+      color: { field: category, type: nominal }
   rev_line:
     mark: line
     encoding:
       x:     { field: month,    type: temporal,     title: Month }
-      y:     { field: revenue,  type: quantitative, aggregate: sum }
+      y:     { field: revenue,  type: quantitative, aggregate: sum, title: Revenue }
       color: { field: category, type: nominal }
 ---
 Revenue is recognised at order date, net of line discount. EMEA orders only.

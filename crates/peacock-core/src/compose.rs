@@ -56,10 +56,21 @@ pub fn compose(
                     "value": value,
                 }));
             }
-            ViewSpec::Vega { data, spec } => {
+            ViewSpec::Vega {
+                data,
+                spec,
+                spec_single,
+            } => {
                 let rs = rowset(rows, data)?;
-                let mut chart = skill.specs.get(spec).cloned().ok_or_else(|| {
-                    Error::render(format!("vega view names unknown spec `{spec}`"))
+                // Pick the single-series spec (e.g. a line) when the data has
+                // ≤1 colour series — a stacked bar across categories reads well,
+                // but a drilled single category reads better as a line.
+                let chosen = match spec_single {
+                    Some(single) if series_count(skill, spec, rs) <= 1 => single,
+                    _ => spec,
+                };
+                let mut chart = skill.specs.get(chosen).cloned().ok_or_else(|| {
+                    Error::render(format!("vega view names unknown spec `{chosen}`"))
                 })?;
                 // Guardrail the AUTHORED spec first — a remote `data.url` or an
                 // expression escape hatch is rejected (ACC-4), not silently
@@ -99,6 +110,32 @@ pub fn compose(
         structured_content,
         png: None,
     })
+}
+
+/// Count the distinct colour-series in a view's rows, per the named spec's
+/// `encoding.color.field`. Used to pick a single-series chart on a drill.
+fn series_count(skill: &ReportSkill, spec: &str, rs: &RowSet) -> usize {
+    let color_field = skill
+        .specs
+        .get(spec)
+        .and_then(|s| s.get("encoding"))
+        .and_then(|e| e.get("color"))
+        .and_then(|c| c.get("field"))
+        .and_then(Value::as_str);
+    match color_field {
+        Some(field) => {
+            let mut seen = std::collections::BTreeSet::new();
+            if let Some(arr) = rs.rows.as_array() {
+                for row in arr {
+                    if let Some(v) = row.get(field).and_then(Value::as_str) {
+                        seen.insert(v.to_owned());
+                    }
+                }
+            }
+            seen.len()
+        }
+        None => 1,
+    }
 }
 
 fn rowset<'a>(rows: &'a BTreeMap<String, RowSet>, alias: &str) -> Result<&'a RowSet> {

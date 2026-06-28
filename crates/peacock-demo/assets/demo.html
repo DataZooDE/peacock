@@ -5,20 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Copilot · peacock demo</title>
 <style>
+  /* The demo's tokens reference peacock's --pk-* theme tokens (injected at
+     render time via #pk-theme), falling back to the stock Copilot look. So
+     switching company/host live restyles the whole UI from one CSS source. */
   :root {
-    --bg: #f3f2f1;
-    --panel: #ffffff;
-    --ink: #201f1e;
-    --ink-soft: #605e5c;
+    --bg: var(--pk-bg, #f3f2f1);
+    --panel: var(--pk-surface, #ffffff);
+    --ink: var(--pk-text, #201f1e);
+    --ink-soft: var(--pk-muted, #605e5c);
     --ink-faint: #8a8886;
-    --line: #edebe9;
-    --line-strong: #e1dfdd;
+    --line: var(--pk-border, #edebe9);
+    --line-strong: var(--pk-border, #e1dfdd);
     --user-bubble: #f5f5f3;
-    --accent: #0f6cbd;
+    --accent: var(--pk-brand, #0f6cbd);
     --accent-soft: #eff6fc;
-    --radius: 14px;
+    --radius: var(--pk-radius, 14px);
     --shadow: 0 1.6px 3.6px rgba(0,0,0,.08), 0 6px 18px rgba(0,0,0,.06);
-    --font: "Segoe UI", -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif;
+    --font: var(--pk-font, "Segoe UI", -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -138,13 +141,32 @@
   .send:hover { filter: brightness(1.06); transform: scale(1.04); }
   .send:disabled { opacity: .5; cursor: default; transform: none; }
   .foot { text-align: center; font-size: 11px; color: var(--ink-faint); margin-top: 9px; }
+  /* Theme switcher controls. */
+  .switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+  .switch select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 8px;
+    border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; }
 </style>
+<style id="pk-theme"></style>
 </head>
 <body>
   <header class="topbar">
     <div class="mark"></div>
     <div class="brand">Copilot</div>
     <div class="ctx">
+      <div class="switch" title="Corporate identity ⊕ host look — one theme styles the chart and this UI">
+        <span>Theme</span>
+        <select id="brandSel">
+          <option value="default">No brand</option>
+          <option value="company-a" selected>Acme A</option>
+          <option value="company-b">Beta B</option>
+        </select>
+        <span>in</span>
+        <select id="hostSel">
+          <option value="copilot" selected>Copilot</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="gemini">Gemini</option>
+        </select>
+      </div>
       <span id="ctxPill" class="pill" style="display:none"><span class="dot"></span><span id="ctxText"></span></span>
     </div>
   </header>
@@ -282,14 +304,29 @@ function renderCard(say, data, lead){
   ctxText.textContent = `Context · category = ${params.category||"ALL"}`;
 }
 
+const brandSel = document.getElementById("brandSel");
+const hostSel = document.getElementById("hostSel");
+const pkTheme = document.getElementById("pk-theme");
+
 async function callRender(params){
   const res = await fetch("/v1/render_report", {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ report_id: REPORT, params, png: true })
+    body: JSON.stringify({ report_id: REPORT, params, png: true,
+                           host: hostSel.value, brand: brandSel.value })
   });
   if(!res.ok){ const e = await res.json().catch(()=>({message:res.statusText})); throw new Error(e.message||"render failed"); }
-  return res.json();
+  const data = await res.json();
+  // One theme, both surfaces: the chart PNG came themed; apply the same CSS to
+  // this UI so the whole report restyles to (company ⊕ host).
+  if(data.theme_css) pkTheme.textContent = data.theme_css;
+  return data;
 }
+
+// Re-render the current report when the company or host changes.
+let lastParams = null;
+function reTheme(){ if(lastParams) showReport(lastParams); }
+brandSel.addEventListener("change", reTheme);
+hostSel.addEventListener("change", reTheme);
 
 function leadFor(data){
   const rows = data.structuredContent.rows || [];
@@ -301,6 +338,7 @@ function leadFor(data){
 }
 
 async function showReport(params, userText){
+  lastParams = params;
   if(userText) addUser(userText);
   const say = addBot(); typing(say);
   try {
@@ -315,6 +353,7 @@ async function showReport(params, userText){
 
 async function drill(cat){
   const params = { ...currentParams, category: cat };
+  lastParams = params;
   const label = cat === "ALL" ? "all categories" : cat;
   addUser(`Show ${label}`);
   const say = addBot(); typing(say);

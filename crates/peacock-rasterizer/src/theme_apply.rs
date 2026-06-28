@@ -68,12 +68,48 @@ pub fn apply_dashboard_theme(svg: &str, t: &ThemeTokens) -> String {
 
 // ── themed public entrypoints ───────────────────────────────────────────────
 
-/// Render a Vega-Lite chart to SVG, restyled with `theme`.
+/// Render a Vega-Lite chart to SVG, restyled with `theme`. Heatmaps / continuous
+/// colour pick up a brand-derived sequential ramp (corporate hue).
 pub fn render_vega_to_svg_themed(
     spec: &serde_json::Value,
     theme: &ThemeTokens,
 ) -> Result<String, RasterError> {
-    Ok(apply_chart_theme(&crate::vegalite_to_svg(spec)?, theme))
+    crate::vegalite::set_sequential_override(brand_ramp(&theme.brand));
+    let svg = crate::vegalite_to_svg(spec);
+    crate::vegalite::set_sequential_override(None); // always clear
+    Ok(apply_chart_theme(&svg?, theme))
+}
+
+/// A single-hue sequential ramp derived from the brand colour: a near-white
+/// tint → the brand → a darkened brand. `None` for an unparseable colour (the
+/// named scheme is kept).
+fn brand_ramp(brand: &str) -> Option<Vec<(u8, u8, u8)>> {
+    let c = parse_hex(brand)?;
+    let mix = |a: (u8, u8, u8), b: (u8, u8, u8), f: f64| -> (u8, u8, u8) {
+        let m = |x: u8, y: u8| (x as f64 * (1.0 - f) + y as f64 * f).round() as u8;
+        (m(a.0, b.0), m(a.1, b.1), m(a.2, b.2))
+    };
+    let white = (255, 255, 255);
+    let black = (0, 0, 0);
+    Some(vec![
+        mix(c, white, 0.88),
+        mix(c, white, 0.35),
+        c,
+        mix(c, black, 0.35),
+    ])
+}
+
+fn parse_hex(s: &str) -> Option<(u8, u8, u8)> {
+    let h = s.trim().strip_prefix('#')?;
+    let full = match h.len() {
+        3 => h.chars().flat_map(|c| [c, c]).collect::<String>(),
+        6 => h.to_string(),
+        _ => return None,
+    };
+    let r = u8::from_str_radix(&full[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&full[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&full[4..6], 16).ok()?;
+    Some((r, g, b))
 }
 
 /// Render a Vega-Lite chart to PNG, restyled with `theme`.

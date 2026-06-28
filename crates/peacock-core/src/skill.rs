@@ -24,7 +24,14 @@ pub enum ViewSpec {
         label: String,
     },
     /// A chart: a named Vega-Lite spec rendered with the view's rows inline.
-    Vega { data: String, spec: String },
+    /// `spec_single` (optional) is used instead when the data resolves to a
+    /// single colour series — e.g. a stacked bar across categories, but a line
+    /// when drilled to one category.
+    Vega {
+        data: String,
+        spec: String,
+        spec_single: Option<String>,
+    },
     /// A data table over the view's rows.
     Table { data: String },
 }
@@ -153,6 +160,10 @@ fn parse_views(id: &str, fm: &Value) -> Result<Vec<ViewSpec>> {
                         Error::render(format!("report `{id}`: a vega view names no `spec`"))
                     })?
                     .to_owned(),
+                spec_single: v
+                    .get("spec_single")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             },
             "table" => ViewSpec::Table { data },
             other => {

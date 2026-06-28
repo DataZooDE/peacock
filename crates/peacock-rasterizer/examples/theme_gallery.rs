@@ -15,9 +15,9 @@ fn main() {
             {"month":"1997-02","category":"Dairy Products","revenue":340.0},
             {"month":"1997-06","category":"Dairy Products","revenue":170.0}
         ]},
-        "mark":"line",
+        "mark":"bar",
         "encoding":{
-            "x":{"field":"month","type":"temporal","title":"Month"},
+            "x":{"field":"month","type":"ordinal","title":"Month"},
             "y":{"field":"revenue","type":"quantitative","aggregate":"sum","title":"Revenue"},
             "color":{"field":"category","type":"nominal"}
         }

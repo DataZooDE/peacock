@@ -43,6 +43,32 @@ fn theme_changes_chart_palette_background_and_font() {
 }
 
 #[test]
+fn theme_rebrands_the_continuous_heatmap_scale() {
+    let heatmap = json!({
+        "data": { "values": [
+            { "x": "A", "y": "P", "v": 1 }, { "x": "B", "y": "P", "v": 9 },
+            { "x": "A", "y": "Q", "v": 5 }, { "x": "B", "y": "Q", "v": 3 }
+        ]},
+        "mark": "rect",
+        "encoding": {
+            "x": { "field": "x", "type": "nominal" },
+            "y": { "field": "y", "type": "nominal" },
+            "color": { "field": "v", "type": "quantitative" }
+        }
+    });
+    let reg = ThemeRegistry::builtin();
+    let themed =
+        render_vega_to_svg_themed(&heatmap, &reg.resolve("company-a", "copilot").tokens).unwrap();
+    let default = peacock_rasterizer::vegalite_to_svg(&heatmap).unwrap();
+
+    // The default heatmap uses viridis (bright yellow at the top); the themed
+    // one uses the brand hue instead.
+    assert!(default.contains("#fde725"), "default viridis end present");
+    assert!(!themed.contains("#fde725"), "brand ramp replaced viridis");
+    assert_ne!(themed, default);
+}
+
+#[test]
 fn themed_chart_and_dashboard_render_real_pngs() {
     let reg = ThemeRegistry::builtin();
     let t = reg.resolve("company-b", "gemini");

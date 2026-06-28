@@ -87,6 +87,7 @@ fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
             ViewSpec::Vega {
                 data: "rev_by_cat".into(),
                 spec: "rev_line".into(),
+                spec_single: None,
             },
             ViewSpec::Table {
                 data: "rev_by_cat".into(),
@@ -136,6 +137,7 @@ fn guardrail_rejects_remote_data_url() {
         vec![ViewSpec::Vega {
             data: "rev_by_cat".into(),
             spec: "rev_line".into(),
+            spec_single: None,
         }],
     );
     let err = compose(&skill, &params(), &rows_map(), DEFAULT_MAX_ROWS).unwrap_err();
@@ -152,6 +154,7 @@ fn guardrail_rejects_expression_escape_hatch() {
         vec![ViewSpec::Vega {
             data: "rev_by_cat".into(),
             spec: "rev_line".into(),
+            spec_single: None,
         }],
     );
     let err = compose(&skill, &params(), &rows_map(), DEFAULT_MAX_ROWS).unwrap_err();
@@ -180,6 +183,7 @@ fn composition_is_pure_same_inputs_same_artifact() {
             ViewSpec::Vega {
                 data: "rev_by_cat".into(),
                 spec: "rev_line".into(),
+                spec_single: None,
             },
             ViewSpec::Table {
                 data: "rev_by_cat".into(),
