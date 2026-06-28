@@ -7,6 +7,12 @@
 // absolute parameter vector. The chart is peacock's own pure-Rust PNG, so the
 // runtime needs no Node/vega CDN (NFR-S-5).
 //
+// Renders are routed through [Mcp] (see `lib/mcp_bridge.dart`): when embedded
+// in an MCP host the app uses `callServerTool('render_report', …)` over the
+// host's `postMessage` bridge and publishes committed drills via
+// `updateModelContext`; standalone (opened at `/app`) it falls back to
+// peacock's same-origin `POST /v1/render_report`.
+//
 // Built with `flutter build web` and served as static assets; no Flutter or
 // Node runtime ships in the peacock alloc (NFR-O-2).
 
@@ -15,9 +21,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
-import 'package:http/http.dart' as http;
 
-const reportId = 'northwind-monthly-revenue';
+import 'mcp_bridge.dart';
+
+/// Default report when none is named on the URL (standalone `/app`).
+const defaultReportId = 'northwind-monthly-revenue';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +60,12 @@ class ReportView extends StatefulWidget {
 }
 
 class _ReportViewState extends State<ReportView> {
+  // The MCP-Apps transport: host bridge when embedded, same-origin fetch when
+  // standalone. Chosen once for the lifetime of the app.
+  final Mcp _mcp = Mcp.detect();
+  // The report to render — named on the URL fragment by the shim, else default.
+  final String _reportId = Mcp.reportIdFromUrl(defaultReportId);
+
   Map<String, dynamic>? _artifact;
   String _category = 'ALL';
   String? _error;
@@ -59,35 +73,69 @@ class _ReportViewState extends State<ReportView> {
   @override
   void initState() {
     super.initState();
-    _render({'from': '1997-01-01', 'to': '1997-12-31', 'category': 'ALL'});
+    _render(
+      {'from': '1997-01-01', 'to': '1997-12-31', 'category': 'ALL'},
+      commit: false,
+    );
   }
 
-  Future<void> _render(Map<String, dynamic> params) async {
+  /// Render with the **absolute** parameter vector (peacock is stateless). When
+  /// [commit] is set (a user-committed drill) the new view-state is also pushed
+  /// to the model via `updateModelContext` (FR-X-3).
+  Future<void> _render(Map<String, dynamic> params, {bool commit = false}) async {
     setState(() => _error = null);
     try {
-      // Same-origin: peacock serves this bundle and the render endpoint.
-      final res = await http.post(
-        Uri.parse('/v1/render_report'),
-        headers: {'content-type': 'application/json'},
-        body: jsonEncode({'report_id': reportId, 'params': params, 'png': true}),
-      );
-      if (res.statusCode != 200) {
-        throw Exception('render failed (${res.statusCode})');
-      }
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
-      setState(() {
-        _artifact = data;
-        _category =
-            (data['structuredContent']?['current_params']?['category'] ?? 'ALL')
-                .toString();
+      final data = await _mcp.callServerTool('render_report', {
+        'report_id': _reportId,
+        'params': params,
       });
+      // MCP `tools/call` nests the artifact under structuredContent + _meta;
+      // the standalone HTTP shape is flat. Normalise so the view sees one map.
+      final artifact = _normalize(data);
+      final sc = (artifact['structuredContent'] as Map?) ?? const {};
+      final current =
+          (sc['current_params'] as Map?)?['category']?.toString() ?? 'ALL';
+      setState(() {
+        _artifact = artifact;
+        _category = current;
+      });
+      if (commit) {
+        final rows = (sc['rows'] as List?)?.cast<Map<String, dynamic>>() ??
+            const <Map<String, dynamic>>[];
+        final total = rows.fold<double>(
+            0, (a, r) => a + ((r['revenue'] as num?)?.toDouble() ?? 0));
+        final scope = current == 'ALL' ? 'All categories' : current;
+        _mcp.updateModelContext({
+          'report_id': _reportId,
+          'params': sc['current_params'] ?? params,
+          'salient_summary': '$scope: \$${total.round()} (1997)',
+        });
+      }
     } catch (e) {
       setState(() => _error = '$e');
     }
   }
 
+  /// Coerce the two result shapes into a flat artifact with `structuredContent`
+  /// and a top-level `png_base64`:
+  ///   * standalone HTTP : `{ structuredContent, png_base64, … }`
+  ///   * MCP tools/call  : `{ structuredContent, _meta: { png_base64 } }`
+  Map<String, dynamic> _normalize(Map<String, Object?> data) {
+    final out = Map<String, dynamic>.from(data);
+    if (out['png_base64'] == null) {
+      final meta = out['_meta'];
+      if (meta is Map && meta['png_base64'] != null) {
+        out['png_base64'] = meta['png_base64'];
+      }
+    }
+    return out;
+  }
+
   void _drill(String cat) {
-    _render({'from': '1997-01-01', 'to': '1997-12-31', 'category': cat});
+    _render(
+      {'from': '1997-01-01', 'to': '1997-12-31', 'category': cat},
+      commit: true,
+    );
   }
 
   @override

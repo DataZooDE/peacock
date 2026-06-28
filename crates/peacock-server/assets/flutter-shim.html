@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>peacock report</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; }
+  /* The Flutter app fills the host iframe. */
+  #peacock-app { display: block; border: 0; width: 100%; height: 100%; min-height: 480px; }
+  .muted { font: 13px system-ui, sans-serif; color: #605e5c; padding: 14px; }
+</style>
+</head>
+<body>
+  <!--
+    peacock's MCP-Apps `ui://` runtime SHIM.
+
+    The MCP-Apps host renders ONE HTML resource in a sandboxed iframe. A Flutter
+    web bundle is multi-file (index.html + main.dart.js + flutter.js + canvaskit/
+    + assets/) and can't be inlined as a single HTML resource — so this tiny
+    self-contained shim *is* the inlined resource, and it nests peacock's hosted
+    Flutter app (served at `/app/`) in a child iframe, bridging the MCP-Apps
+    postMessage channel between the host (this shim's parent) and the Flutter app
+    (this shim's child). See doc/flutter-iframe-runtime-proposal.md.
+
+    Message shapes (the contract `crates/peacock-server/assets/iframe.html`
+    established):
+      host  → shim/app : `mcp:callServerTool:result { reqId, result }`
+      app   → shim/host: `mcp:callServerTool { reqId, name, arguments }`
+                         `mcp:updateModelContext { record }`
+
+    The shim is a transparent relay: it forwards app→host requests up and
+    host→app results down, matching on `reqId`. peacock injects the served base
+    URL and the report id below (PEACOCK_APP_BASE / __REPORT_ID__).
+  -->
+  <div class="muted" id="status">Loading peacock report…</div>
+  <iframe id="peacock-app" title="peacock report" src="" referrerpolicy="no-referrer"></iframe>
+<script>
+  // Injected by the serving layer. APP_BASE is peacock's `/app/` mount; when the
+  // shim is opened standalone for verification it defaults to a sibling `/app/`.
+  var APP_BASE = "__PEACOCK_APP_BASE__";
+  var REPORT_ID = "__REPORT_ID__";
+  if (APP_BASE.indexOf("__") === 0) APP_BASE = "/app/";
+  if (REPORT_ID.indexOf("__") === 0) REPORT_ID = "";
+
+  var appFrame = document.getElementById("peacock-app");
+  var appWindow = null;
+  // Carry the report id (and a marker) to the Flutter app via the URL hash, so
+  // it can render the right report and know it is embedded.
+  var hash = "#mcp" + (REPORT_ID ? ("&report=" + encodeURIComponent(REPORT_ID)) : "");
+  appFrame.src = APP_BASE + hash;
+  appFrame.addEventListener("load", function () {
+    appWindow = appFrame.contentWindow;
+    var s = document.getElementById("status");
+    if (s) s.remove();
+  });
+
+  // Relay app → host (callServerTool requests, updateModelContext). The Flutter
+  // app posts to *its* parent (this shim); we forward verbatim to *our* parent
+  // (the MCP host). Results come back keyed by reqId.
+  window.addEventListener("message", function (e) {
+    var d = e.data;
+    if (!d || typeof d !== "object") return;
+
+    // From the Flutter app (child) → forward up to the host (parent).
+    if (e.source === appWindow) {
+      if (d.type === "mcp:callServerTool" || d.type === "mcp:updateModelContext") {
+        if (window.parent !== window) {
+          window.parent.postMessage(d, "*");
+        } else {
+          // Standalone shim (no host): answer callServerTool ourselves so the
+          // resource is independently verifiable, mirroring iframe.html.
+          if (d.type === "mcp:callServerTool") standaloneCall(d);
+        }
+      }
+      return;
+    }
+
+    // From the host (parent) → forward down to the Flutter app (child).
+    if (window.parent !== window && e.source === window.parent) {
+      if (d.type === "mcp:callServerTool:result" && appWindow) {
+        appWindow.postMessage(d, "*");
+      }
+    }
+  });
+
+  // Standalone fallback: call peacock's same-origin render endpoint and post the
+  // result back down to the Flutter app, so the shim works when opened directly.
+  function standaloneCall(req) {
+    var a = req.arguments || {};
+    fetch("/v1/render_report", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ report_id: a.report_id, params: a.params, png: true })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (result) {
+        if (appWindow) {
+          appWindow.postMessage({ type: "mcp:callServerTool:result", reqId: req.reqId, result: result }, "*");
+        }
+      });
+  }
+</script>
+</body>
+</html>

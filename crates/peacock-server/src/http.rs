@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::{get, post},
@@ -44,10 +44,38 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     // The Flutter-web client, when a built bundle is provided.
     if let Some(dir) = &state.flutter_dir {
-        app = app.nest_service("/app", tower_http::services::ServeDir::new(dir));
+        app = app
+            .nest_service("/app", tower_http::services::ServeDir::new(dir))
+            // The MCP-Apps `ui://` runtime shim: a single self-contained HTML
+            // resource that nests the multi-file Flutter bundle (served at
+            // `/app/`) and bridges the host's postMessage channel to it. This
+            // is what a host's `ui://peacock/<report>` iframe should point at;
+            // serving it here keeps the bridge with the bundle it embeds.
+            .route("/app-shim", get(app_shim));
     }
 
     app.with_state(state)
+}
+
+/// The runtime shim served at `GET /app-shim?report=<id>` (FR-M-1). It inlines
+/// nothing of the Flutter bundle — it nests `/app/` in a child iframe and relays
+/// MCP-Apps `postMessage` between the host and the Flutter app. See
+/// `doc/flutter-iframe-runtime-proposal.md`.
+const FLUTTER_SHIM_HTML: &str = include_str!("../assets/flutter-shim.html");
+
+#[derive(Deserialize)]
+struct ShimQuery {
+    /// The report id the embedded Flutter app should render.
+    #[serde(default)]
+    report: String,
+}
+
+async fn app_shim(Query(q): Query<ShimQuery>) -> impl IntoResponse {
+    // Inject the report id; the app base is fixed to peacock's `/app/` mount.
+    let html = FLUTTER_SHIM_HTML
+        .replace("__PEACOCK_APP_BASE__", "/app/")
+        .replace("__REPORT_ID__", &q.report);
+    Html(html)
 }
 
 /// Bind `addr` and serve until the process exits.

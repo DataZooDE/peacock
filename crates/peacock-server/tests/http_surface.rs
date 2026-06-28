@@ -98,3 +98,69 @@ async fn drill_param_re_renders() {
     );
     nw.shutdown().await;
 }
+
+/// Start a peacock with a (fake) Flutter bundle directory so `/app` and the
+/// MCP-Apps shim route are mounted.
+async fn start_with_flutter() -> (NorthwindEscurel, String, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("index.html"),
+        "<!doctype html><title>peacock_web</title>",
+    )
+    .unwrap();
+    let nw = NorthwindEscurel::spawn().await;
+    let state = Arc::new(AppState {
+        escurel: EscurelData::new(nw.endpoint()),
+        principal: nw.sales_principal(),
+        png_scale: 2.0,
+        demo_html: "<!doctype html><title>peacock demo</title>",
+        flutter_dir: Some(dir.path().to_path_buf()),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    tokio::spawn(async move { serve(addr, state).await.unwrap() });
+    for _ in 0..50 {
+        if reqwest::get(format!("http://{addr}/healthz")).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    (nw, format!("http://{addr}"), dir)
+}
+
+#[tokio::test]
+async fn flutter_bundle_and_mcp_shim_are_served() {
+    // The Flutter client mounts at `/app`, and the MCP-Apps runtime shim that
+    // nests it mounts at `/app-shim` — the bridge a host's `ui://` iframe loads.
+    let (nw, base, _dir) = start_with_flutter().await;
+    let client = reqwest::Client::new();
+
+    // /app serves the bundle's index.html.
+    let app = client.get(format!("{base}/app/")).send().await.unwrap();
+    assert!(app.status().is_success());
+    assert!(app.text().await.unwrap().contains("peacock_web"));
+
+    // /app-shim nests the Flutter app and carries the report id on the hash, and
+    // bridges the MCP-Apps postMessage verbs.
+    let shim = client
+        .get(format!("{base}/app-shim?report=northwind-monthly-revenue"))
+        .send()
+        .await
+        .unwrap();
+    assert!(shim.status().is_success());
+    let html = shim.text().await.unwrap();
+    assert!(
+        html.contains("/app/"),
+        "shim nests the Flutter app at /app/"
+    );
+    assert!(
+        html.contains("northwind-monthly-revenue"),
+        "shim carries the report id"
+    );
+    assert!(
+        html.contains("mcp:callServerTool") && html.contains("mcp:updateModelContext"),
+        "shim relays the MCP-Apps verbs"
+    );
+    nw.shutdown().await;
+}

@@ -2,19 +2,38 @@
 <html>
 <head>
   <!--
-    If you are serving your web app in a path other than the root, change the
-    href value below to reflect the base path you are serving from.
+    Robust subpath serving (peacock issue #1: CanvasKit/assets 404 at `/app/`).
 
-    The path provided below has to start and end with a slash "/" in order for
-    it to work correctly.
+    Flutter resolves `main.dart.js`, `flutter.js`, `canvaskit/` and `assets/`
+    relative to the document's <base href>. peacock serves this same bundle at
+    two mount points — `/app/` (the standalone client) and, nested under a host
+    iframe, at whatever path the host gives it — so a build-time `--base-href`
+    is fragile (the build step had to *remember* the mount path).
 
-    For more details:
-    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+    Instead we set the base href **at runtime** to the directory the document
+    was loaded from. `document.baseURI` / `location.pathname` always reflects the
+    real mount, so the bundle is mount-agnostic: `flutter build web` with the
+    default base href just works at `/`, `/app/`, or any nested path. The
+    documented build step still passes `--base-href /app/` as a belt-and-braces
+    default for crawlers/no-JS, but serving no longer depends on it.
 
-    This is a placeholder for base href that will be replaced by the value of
-    the `--base-href` argument provided to `flutter build`.
+    See doc/flutter-iframe-runtime-proposal.md.
   -->
   <base href="$FLUTTER_BASE_HREF">
+  <script>
+    // Rewrite <base> to the directory of the current document, so relative
+    // asset URLs resolve under whatever path peacock mounted the bundle at.
+    (function () {
+      var path = window.location.pathname;
+      // Directory of the document: keep the trailing slash; if the URL ends in
+      // a file (…/index.html) strip the file segment.
+      if (!path.endsWith('/')) {
+        path = path.substring(0, path.lastIndexOf('/') + 1);
+      }
+      var base = document.querySelector('base');
+      if (base) base.setAttribute('href', path);
+    })();
+  </script>
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
