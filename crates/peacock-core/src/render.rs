@@ -30,6 +30,15 @@ pub struct RenderOpts {
     /// demo's "under the hood" inspector to show genuine — not reconstructed —
     /// traffic. `None` records nothing.
     pub trace: Option<crate::TraceSink>,
+    /// Opt-in **Mosaic mode** threshold (BRD §7 deferred big-data cross-filter).
+    /// `None` (default) keeps the inline-data + re-render model for every view.
+    /// When `Some(n)` and a chart view's row count exceeds `n`, that view is
+    /// emitted as a Mosaic-mode artifact: a vgplot/Mosaic spec plus an
+    /// escurel-owned data-**source** reference (`query_ref` + bound params), so
+    /// the Mosaic client streams from escurel rather than peacock inlining the
+    /// oversized rows. This is below `max_rows` (the hard render cap): a view
+    /// over `max_rows` and without a mosaic threshold still errors (NFR-P-3).
+    pub mosaic_threshold: Option<usize>,
 }
 
 impl Default for RenderOpts {
@@ -39,6 +48,7 @@ impl Default for RenderOpts {
             png_scale: None,
             theme: None,
             trace: None,
+            mosaic_threshold: None,
         }
     }
 }
@@ -81,8 +91,17 @@ where
         rows.insert(alias.clone(), rs);
     }
 
-    // 4. Compose the one artifact (FR-R-3).
-    let mut artifact = compose(&skill, &absolute, &rows, opts.max_rows)?;
+    // 4. Compose the one artifact (FR-R-3). `bound` (the absolute param vector
+    //    as JSON) travels into compose so a Mosaic-mode view can carry the
+    //    escurel-owned data-source reference (`query_ref` + bound params).
+    let mut artifact = compose(
+        &skill,
+        &absolute,
+        &bound,
+        &rows,
+        opts.max_rows,
+        opts.mosaic_threshold,
+    )?;
 
     // 5. Optionally rasterize the first chart to PNG (chat / embedded preview),
     //    themed with the resolved corporate identity ⊕ host look when set.

@@ -95,7 +95,15 @@ fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
         ],
     );
 
-    let art = compose(&skill, &params(), &rows_map(), DEFAULT_MAX_ROWS).unwrap();
+    let art = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
 
     assert_eq!(art.a2ui["version"], "0.9");
     let comps = art.a2ui["components"].as_array().unwrap();
@@ -140,7 +148,15 @@ fn guardrail_rejects_remote_data_url() {
             spec_single: None,
         }],
     );
-    let err = compose(&skill, &params(), &rows_map(), DEFAULT_MAX_ROWS).unwrap_err();
+    let err = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap_err();
     assert_eq!(err.kind(), "render");
 }
 
@@ -157,7 +173,15 @@ fn guardrail_rejects_expression_escape_hatch() {
             spec_single: None,
         }],
     );
-    let err = compose(&skill, &params(), &rows_map(), DEFAULT_MAX_ROWS).unwrap_err();
+    let err = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap_err();
     assert_eq!(err.kind(), "render");
 }
 
@@ -170,7 +194,7 @@ fn oversize_result_set_is_a_bounded_render_error() {
             data: "rev_by_cat".into(),
         }],
     );
-    let err = compose(&skill, &params(), &rows_map(), 2).unwrap_err();
+    let err = compose(&skill, &params(), &json!({}), &rows_map(), 2, None).unwrap_err();
     assert_eq!(err.kind(), "render");
 }
 
@@ -190,7 +214,23 @@ fn composition_is_pure_same_inputs_same_artifact() {
             },
         ],
     );
-    let a = compose(&skill, &params(), &rows_map(), DEFAULT_MAX_ROWS).unwrap();
-    let b = compose(&skill, &params(), &rows_map(), DEFAULT_MAX_ROWS).unwrap();
+    let a = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+    let b = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
     assert_eq!(a, b);
 }

@@ -11,7 +11,7 @@ use peacock_types::{Artifact, Error, ParamValue, Result, StructuredContent};
 use serde_json::{Value, json};
 
 use crate::data::RowSet;
-use crate::guardrail::check_vega_spec;
+use crate::guardrail::{check_mosaic_source, check_vega_spec};
 use crate::skill::{Agg, ReportSkill, ViewSpec};
 
 /// Default cap on rows a single view may carry into a rendered artifact
@@ -20,21 +20,33 @@ use crate::skill::{Agg, ReportSkill, ViewSpec};
 pub const DEFAULT_MAX_ROWS: usize = 10_000;
 
 /// Compose the artifact. `rows` is keyed by the report's data aliases.
+/// `bound` is the absolute parameter vector as JSON — it travels with a
+/// Mosaic-mode view's escurel-owned data-source reference. `mosaic_threshold`,
+/// when `Some(n)`, switches any chart view whose row count exceeds `n` from
+/// inline data to Mosaic mode (BRD §7) instead of inlining the rows.
 pub fn compose(
     skill: &ReportSkill,
     params: &BTreeMap<String, ParamValue>,
+    bound: &Value,
     rows: &BTreeMap<String, RowSet>,
     max_rows: usize,
+    mosaic_threshold: Option<usize>,
 ) -> Result<Artifact> {
-    // Oversize guard before building anything (NFR-P-3).
+    // Oversize guard before building anything (NFR-P-3). Mosaic mode (which
+    // streams from escurel rather than inlining) lifts this for chart views;
+    // a non-chart view (table/kpi) over `max_rows` still refuses to render.
     for (alias, rs) in rows {
         let n = rs.rows.as_array().map(Vec::len).unwrap_or(0);
-        if n > max_rows {
+        let mosaic_covers = mosaic_threshold.is_some_and(|t| n > t);
+        if n > max_rows && !mosaic_covers {
             return Err(Error::render(format!(
                 "view `{alias}` returned {n} rows (> {max_rows}); refusing to render unbounded"
             )));
         }
     }
+    // Track whether any view rendered in Mosaic mode: the structuredContent
+    // summary must then omit the big inline rows (the row count stands in).
+    let mut any_mosaic = false;
 
     let mut components: Vec<Value> = Vec::new();
     let mut vega_specs: Vec<Value> = Vec::new();
@@ -62,6 +74,7 @@ pub fn compose(
                 spec_single,
             } => {
                 let rs = rowset(rows, data)?;
+                let n = rs.rows.as_array().map(Vec::len).unwrap_or(0);
                 // Pick the single-series spec (e.g. a line) when the data has
                 // ≤1 colour series — a stacked bar across categories reads well,
                 // but a drilled single category reads better as a line.
@@ -74,11 +87,36 @@ pub fn compose(
                 })?;
                 // Guardrail the AUTHORED spec first — a remote `data.url` or an
                 // expression escape hatch is rejected (ACC-4), not silently
-                // stripped — then inject the escurel rows as inline data.
+                // stripped.
                 check_vega_spec(&chart)?;
-                inject_inline_data(&mut chart, rs.rows.clone());
-                vega_specs.push(chart.clone());
-                components.push(json!({ "kind": "vega", "spec": chart }));
+
+                if mosaic_threshold.is_some_and(|t| n > t) {
+                    // Mosaic mode: do NOT inline the big rows. Emit a vgplot
+                    // spec (mark + encodings, no data) plus the escurel-owned
+                    // data-source reference (`query_ref` + bound params) — the
+                    // single allow-listed non-inline source.
+                    let query_ref = skill.data.get(data).cloned().unwrap_or_default();
+                    let source = json!({
+                        "connector": "escurel",
+                        "query_ref": query_ref,
+                        "params": bound.clone(),
+                    });
+                    check_mosaic_source(&source)?;
+                    any_mosaic = true;
+                    components.push(json!({
+                        "kind": "mosaic",
+                        "artifact": {
+                            "spec": chart,
+                            "source": source,
+                            "row_count": n,
+                        },
+                    }));
+                } else {
+                    // Default model: inject the escurel rows as inline data.
+                    inject_inline_data(&mut chart, rs.rows.clone());
+                    vega_specs.push(chart.clone());
+                    components.push(json!({ "kind": "vega", "spec": chart }));
+                }
             }
             ViewSpec::Table { data } => {
                 let rs = rowset(rows, data)?;
@@ -98,8 +136,15 @@ pub fn compose(
 
     let a2ui = json!({ "version": "0.9", "components": components });
 
+    // In Mosaic mode the primary rows are too big to inline; the summary keeps
+    // the resolved params (the view state, FR-X-1) and an empty rows array (the
+    // per-view `row_count` lives on the mosaic component).
     let structured_content = StructuredContent {
-        rows: primary_rows(skill, rows),
+        rows: if any_mosaic {
+            json!([])
+        } else {
+            primary_rows(skill, rows)
+        },
         param_schema: serde_json::to_value(&skill.params).unwrap_or(Value::Null),
         current_params: params_to_json(params),
     };
