@@ -165,7 +165,15 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 .png
                 .as_ref()
                 .map(|p| base64::engine::general_purpose::STANDARD.encode(p));
-            let trace = pipeline_trace(&req.report_id, host, &brand, &theme, &art, req.png);
+            let trace = pipeline_trace(
+                &req.report_id,
+                host,
+                &brand,
+                &theme,
+                &art,
+                req.png,
+                &state.principal,
+            );
             Json(json!({
                 "report_id": req.report_id,
                 "a2ui": art.a2ui,
@@ -197,6 +205,7 @@ fn pipeline_trace(
     theme: &peacock_rasterizer::Theme,
     art: &peacock_types::Artifact,
     png: bool,
+    principal: &Principal,
 ) -> Value {
     let sc = &art.structured_content;
     let rows = sc.rows.as_array().map(Vec::len).unwrap_or(0);
@@ -222,7 +231,74 @@ fn pipeline_trace(
         .and_then(|m| m.as_str().or_else(|| m.get("type").and_then(Value::as_str)))
         .unwrap_or("—");
 
-    let params_pretty = serde_json::to_string_pretty(&sc.current_params).unwrap_or_default();
+    let pretty = |v: &Value| serde_json::to_string_pretty(v).unwrap_or_default();
+
+    // --- Wire payloads for the cross-process hops (Triton, escurel) ---
+
+    // Triton → peacock: the HTTP request peacock receives (the static-upstream
+    // contract), plus the principal Triton minted from the OIDC token.
+    let triton_request = pretty(&json!({
+        "request": "POST / HTTP/1.1",
+        "headers": {
+            "X-Triton-Tool": "render_report",
+            "Authorization": "Bearer <OIDC-minted JWT>",
+            "Content-Type": "application/json"
+        },
+        "principal": {
+            "sub": principal.sub, "tenant": principal.tenant,
+            "groups": principal.groups, "scopes": principal.scopes
+        },
+        "body": { "report_id": report_id, "params": sc.current_params, "host": host, "brand": brand }
+    }));
+
+    // peacock → escurel: the escurel-client resolve request, and a sketch of the
+    // resolved skill it returns (the real view kinds peacock composed from).
+    let resolve_request = pretty(&json!({
+        "method": "resolve",
+        "wikilink": format!("[[skill::{report_id}]]"),
+        "scenario": ""
+    }));
+    let resolve_response = pretty(&json!({
+        "page_id": format!("skill::{report_id}"),
+        "frontmatter": {
+            "render": "a2ui",
+            "views": kinds,
+            "note": "+ params schema, data refs ([[query::…]]), named Vega-Lite specs"
+        },
+        "body": "the agent-authored narrative (skill body)"
+    }));
+
+    // peacock → escurel: the query_instance request (typed params, no SQL) and
+    // the real response — schema + the first rows + the row count escurel returned.
+    let query_request = pretty(&json!({
+        "method": "query_instance",
+        "params": sc.current_params,
+        "note": "the view id is resolved from the report's data binding; :params are bound as prepared-statement values"
+    }));
+    let row_sample: Vec<Value> = sc
+        .rows
+        .as_array()
+        .map(|r| r.iter().take(6).cloned().collect())
+        .unwrap_or_default();
+    let columns: Vec<String> = row_sample
+        .first()
+        .and_then(Value::as_object)
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+    let query_response = pretty(&json!({
+        "schema": columns,
+        "rows": row_sample,
+        "row_count": rows,
+        "truncated": false,
+        "note": if rows > 6 { "first 6 of N rows shown" } else { "all rows shown" }
+    }));
+
+    // Triton → agent/host: the canonical envelope Triton relays back.
+    let relay_payload = pretty(&json!({
+        "surface": { "components": kinds.iter().map(|k| json!({ "kind": k })).collect::<Vec<_>>() },
+        "structuredContent": { "row_count": rows, "current_params": sc.current_params },
+        "_meta": { "ui": { "resourceUri": format!("ui://peacock/{report_id}") } }
+    }));
 
     json!([
         {
@@ -242,28 +318,32 @@ fn pipeline_trace(
         {
             "n": 3, "actor": "triton", "kind": "route", "title": "Authorize + dispatch",
             "protocol": "HTTP", "wire": "POST / · X-Triton-Tool: render_report · Authorization: Bearer",
-            "detail": "terminates TLS/OIDC, mints the principal, routes to the peacock upstream (the Triton static-upstream contract)"
+            "detail": "terminates TLS/OIDC, mints the principal, routes to the peacock upstream (the Triton static-upstream contract)",
+            "code": triton_request
         },
         {
             "n": 4, "actor": "peacock", "kind": "resolve", "title": "Resolve report skill",
-            "protocol": "HTTP", "wire": "escurel-client (HTTP/JSON, Bearer-forwarded principal)",
-            "detail": format!("asks escurel for [[skill::{report_id}]] — peacock holds no DSN, no DB driver")
+            "protocol": "HTTP", "wire": "escurel-client resolve request (HTTP/JSON, Bearer-forwarded principal)",
+            "detail": format!("asks escurel for [[skill::{report_id}]] — peacock holds no DSN, no DB driver"),
+            "code": resolve_request
         },
         {
             "n": 5, "actor": "escurel", "kind": "data", "title": "resolve(skill)",
-            "protocol": "HTTP", "wire": "escurel-client response (HTTP/JSON)",
-            "detail": "returns the report skill: params schema, data refs, view layout, chart specs"
+            "protocol": "HTTP", "wire": "escurel-client resolve response (HTTP/JSON)",
+            "detail": "returns the report skill: params schema, data refs, view layout, chart specs",
+            "code": resolve_response
         },
         {
             "n": 6, "actor": "peacock", "kind": "read", "title": "Read rows",
-            "protocol": "HTTP", "wire": "escurel-client query_instance (HTTP/JSON)",
-            "detail": "calls query_instance(view, params) — untrusted params travel as typed values, peacock builds no SQL string"
+            "protocol": "HTTP", "wire": "escurel-client query_instance request (HTTP/JSON)",
+            "detail": "calls query_instance(view, params) — untrusted params travel as typed values, peacock builds no SQL string",
+            "code": query_request
         },
         {
             "n": 7, "actor": "escurel", "kind": "data", "title": "query_instance",
             "protocol": "HTTP", "wire": "escurel-client response (HTTP/JSON) — DuckDB prepared statement",
             "detail": format!("{rows} access-checked rows · :params bound as prepared-statement values · ACL enforced here (the only data path)"),
-            "code": params_pretty
+            "code": query_response
         },
         {
             "n": 8, "actor": "peacock", "kind": "compose", "title": "Compose A2UI v0.9",
@@ -295,7 +375,8 @@ fn pipeline_trace(
         {
             "n": 13, "actor": "triton", "kind": "relay", "title": "Relay surface",
             "protocol": "HTTP→MCP", "wire": "peacock HTTP 2xx body → projected back to the agent over MCP",
-            "detail": "passes the A2UI surface + structuredContent + the ui:// resource back toward the agent and host"
+            "detail": "passes the A2UI surface + structuredContent + the ui:// resource back toward the agent and host",
+            "code": relay_payload
         },
         {
             "n": 14, "actor": "agent", "kind": "state", "title": "updateModelContext (FR-X)",
