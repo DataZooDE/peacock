@@ -14,7 +14,7 @@ pub mod render;
 pub mod skill;
 
 pub use data::{Column, EscurelData, ReportData, RowSet};
-pub use render::{RenderOpts, render, render_a2ui_to_png, view_state_record};
+pub use render::{RenderOpts, promotable_selection, render, render_a2ui_to_png, view_state_record};
 pub use skill::{Agg, ReportSkill, ReportSkills, ViewSpec};
 
 /// A sink that captures the **real** escurel-client wire payloads a render
