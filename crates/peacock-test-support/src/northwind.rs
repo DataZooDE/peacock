@@ -87,6 +87,14 @@ fn query_revenue_by_category() -> String {
 /// The `northwind-monthly-revenue` report skill (the paper's example):
 /// render params, data bound by reference to the query page, the view layout,
 /// and the named Vega-Lite chart spec.
+///
+/// Exposed (via the [`skill_report_markdown`] re-export) so authoring-tooling
+/// tests can feed the canonical valid skill to `peacock author validate` /
+/// `preview` without duplicating the markdown.
+pub fn skill_report_markdown() -> String {
+    skill_report()
+}
+
 fn skill_report() -> String {
     r#"---
 type: skill
