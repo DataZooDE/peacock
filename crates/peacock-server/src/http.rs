@@ -165,6 +165,7 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 .png
                 .as_ref()
                 .map(|p| base64::engine::general_purpose::STANDARD.encode(p));
+            let trace = pipeline_trace(&req.report_id, host, &brand, &theme, &art, req.png);
             Json(json!({
                 "report_id": req.report_id,
                 "a2ui": art.a2ui,
@@ -175,11 +176,91 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 // both the chart and the chrome.
                 "theme_css": theme.css,
                 "theme": { "host": theme.host, "brand": theme.brand },
+                // The render pipeline, step by step (the demo's inspector panel).
+                "trace": trace,
             }))
             .into_response()
         }
         Err(e) => error_response(&e),
     }
+}
+
+/// Describe the render pipeline that just ran, step by step — what the demo's
+/// "under the hood" inspector shows. Each step carries a `kind` (for styling), a
+/// title, a one-line `detail`, and optional `code` (JSON/CSS) to expand.
+fn pipeline_trace(
+    report_id: &str,
+    host: &str,
+    brand: &str,
+    theme: &peacock_rasterizer::Theme,
+    art: &peacock_types::Artifact,
+    png: bool,
+) -> Value {
+    let sc = &art.structured_content;
+    let rows = sc.rows.as_array().map(Vec::len).unwrap_or(0);
+    let kinds: Vec<&str> = art
+        .a2ui
+        .get("components")
+        .and_then(Value::as_array)
+        .map(|cs| {
+            cs.iter()
+                .filter_map(|c| c.get("kind").and_then(Value::as_str))
+                .collect()
+        })
+        .unwrap_or_default();
+    let vega = art.vega_specs.first().cloned().unwrap_or(Value::Null);
+    let mark = vega
+        .get("mark")
+        .and_then(|m| m.as_str().or_else(|| m.get("type").and_then(Value::as_str)))
+        .unwrap_or("—");
+
+    json!([
+        {
+            "n": 1, "kind": "tool", "title": "Tool call · render_report",
+            "detail": format!("host = {host} · brand = {brand}"),
+            "code": serde_json::to_string_pretty(&json!({
+                "name": "render_report",
+                "arguments": { "report_id": report_id, "params": sc.current_params, "host": host, "brand": brand }
+            })).unwrap_or_default()
+        },
+        {
+            "n": 2, "kind": "data", "title": "escurel · resolve(skill)",
+            "detail": format!("[[skill::{report_id}]] → report skill (params schema, data refs, views)")
+        },
+        {
+            "n": 3, "kind": "data", "title": "escurel · query_instance(view, params)",
+            "detail": format!("{rows} access-checked rows · params bound as prepared-statement values (peacock builds no SQL, holds no DSN)"),
+            "code": serde_json::to_string_pretty(&sc.current_params).unwrap_or_default()
+        },
+        {
+            "n": 4, "kind": "compose", "title": "Compose A2UI v0.9",
+            "detail": format!("layout components: {}", if kinds.is_empty() { "—".into() } else { kinds.join(", ") })
+        },
+        {
+            "n": 5, "kind": "guardrail", "title": "Render guardrail",
+            "detail": "inline-data-only · no remote data.url · no expr/signal — an agent-authored spec can't fetch or compute beyond its rows ✓"
+        },
+        {
+            "n": 6, "kind": "vega", "title": format!("Vega-Lite spec · mark “{mark}” (rows injected inline)"),
+            "code": serde_json::to_string_pretty(&vega).unwrap_or_default()
+        },
+        {
+            "n": 7, "kind": "theme", "title": format!("Theme · {brand} ⊕ {host}"),
+            "detail": "one CSS source styles the chart tokens AND the web chrome",
+            "code": theme.css.trim().to_string()
+        },
+        {
+            "n": 8, "kind": "raster", "title": "Rasterize → PNG",
+            "detail": if png { "pure-Rust Vega-Lite → SVG → PNG (resvg/tiny-skia, no Node/Deno/network)" } else { "(not requested)" }
+        },
+        {
+            "n": 9, "kind": "state", "title": "State transfer (FR-X)",
+            "detail": "view state = the absolute parameter vector; pushed to the model via updateModelContext {report_id, params, summary} — compact, no rows. peacock stays stateless.",
+            "code": serde_json::to_string_pretty(&json!({
+                "report_id": report_id, "params": sc.current_params, "salient_summary": "…"
+            })).unwrap_or_default()
+        }
+    ])
 }
 
 /// Map a peacock error to an HTTP status by **variant** (HLD §8.3), never by

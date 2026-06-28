@@ -145,6 +145,48 @@
   .switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
   .switch select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 8px;
     border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; }
+
+  /* "Under the hood" inspector — the render pipeline beside the chat. Hidden on
+     narrow screens; on wide ones it's a fixed right rail and the chat reserves
+     space for it (body padding-right + composer offset below). */
+  #inspector { position: fixed; top: 0; right: 0; bottom: 0; width: 460px; z-index: 6;
+    background: var(--panel); border-left: 1px solid var(--line-strong);
+    display: none; flex-direction: column; box-shadow: -8px 0 24px rgba(0,0,0,.04); }
+  .insp-head { padding: 15px 18px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .insp-title { font-weight: 700; font-size: 13.5px; letter-spacing: .2px; }
+  .insp-title::before { content: "⚙  "; }
+  .insp-sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 4px; line-height: 1.45; }
+  .insteps { overflow-y: auto; padding: 10px 18px 32px; flex: 1; }
+  .insp-empty { color: var(--ink-faint); font-size: 12.5px; padding: 30px 6px; text-align: center; line-height: 1.5; }
+  .istep { position: relative; padding: 8px 0 15px 22px; }
+  .istep::before { content: ""; position: absolute; left: 5px; top: 14px; bottom: -3px; width: 2px; background: var(--line-strong); }
+  .istep:last-child::before { display: none; }
+  .istep .dot { position: absolute; left: 0; top: 9px; width: 12px; height: 12px; border-radius: 50%;
+    background: #fff; border: 2px solid var(--accent); }
+  .istep .t { font-size: 12.5px; font-weight: 600; line-height: 1.35; }
+  .istep .n { color: var(--ink-faint); font-weight: 700; margin-right: 5px; }
+  .istep .d { font-size: 11.5px; color: var(--ink-soft); margin-top: 4px; line-height: 1.5; }
+  .kind { display: inline-block; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px;
+    padding: 1px 6px; border-radius: 6px; margin-left: 6px; vertical-align: 1px; }
+  .k-tool{background:#eef6fc;color:#0f6cbd} .k-data{background:#eef7e8;color:#3b6e22}
+  .k-compose{background:#f3eefc;color:#6b3fa0} .k-guardrail{background:#fdeeee;color:#c4314b}
+  .k-vega{background:#e9f7f5;color:#0a7d77} .k-theme{background:#fdf0f7;color:#b3367f}
+  .k-raster{background:#fff4e6;color:#b5650b} .k-state{background:#eef2f7;color:#3a5a8c}
+  .istep details { margin-top: 7px; }
+  .istep summary { cursor: pointer; font-size: 11px; color: var(--accent); user-select: none;
+    list-style: none; display: inline-flex; align-items: center; gap: 5px; }
+  .istep summary::-webkit-details-marker { display: none; }
+  .istep summary::before { content: "▸"; font-size: 9px; }
+  .istep details[open] summary::before { content: "▾"; }
+  .istep pre { margin: 6px 0 0; background: #1f2430; color: #d7dce5; font-size: 10.5px; line-height: 1.45;
+    border-radius: 8px; padding: 9px 11px; overflow: auto; max-height: 240px; white-space: pre;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  @media (min-width: 1180px) {
+    body { padding-right: 460px; }
+    .composer { right: 460px; }
+    #inspector { display: flex; }
+  }
 </style>
 <style id="pk-theme"></style>
 </head>
@@ -193,6 +235,16 @@
     </section>
   </main>
 
+  <aside id="inspector">
+    <div class="insp-head">
+      <div class="insp-title">Under the hood</div>
+      <div class="insp-sub">How peacock turns your question into this report — every step in the render pipeline, with the real payloads it passed along.</div>
+    </div>
+    <div id="insteps" class="insteps">
+      <div class="insp-empty">Ask a question, and the render pipeline — tool call → escurel data → A2UI → Vega-Lite → theme → PNG → state transfer — will appear here, step by step.</div>
+    </div>
+  </aside>
+
   <div class="composer">
     <div class="inner">
       <div class="quick" id="quick"></div>
@@ -219,6 +271,21 @@ const ctxText = document.getElementById("ctxText");
 let currentParams = { from: "1997-01-01", to: "1997-12-31", category: "ALL" };
 
 const money = n => "$" + Number(n).toLocaleString("en-US", {maximumFractionDigits:0});
+const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+
+// Render the server-provided pipeline trace into the inspector rail, so an
+// interested viewer can see exactly how the rendering was produced.
+function updateInspector(trace){
+  const el = document.getElementById("insteps");
+  if(!trace || !trace.length){ return; }
+  el.innerHTML = trace.map(s => `
+    <div class="istep">
+      <div class="dot"></div>
+      <div class="t"><span class="n">${s.n}</span>${esc(s.title)}<span class="kind k-${s.kind}">${esc(s.kind)}</span></div>
+      ${s.detail ? `<div class="d">${esc(s.detail)}</div>` : ""}
+      ${s.code ? `<details><summary>payload</summary><pre>${esc(s.code)}</pre></details>` : ""}
+    </div>`).join("");
+}
 
 function scrollDown(){ window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }
 
@@ -302,6 +369,9 @@ function renderCard(say, data, lead){
   // context sync indicator (the agent now "knows" the view state)
   ctxPill.style.display = "inline-flex";
   ctxText.textContent = `Context · category = ${params.category||"ALL"}`;
+
+  // The "under the hood" rail: show how this very rendering was produced.
+  updateInspector(data.trace);
 }
 
 const brandSel = document.getElementById("brandSel");
