@@ -1,0 +1,191 @@
+name: release
+
+# Cross-platform release of the `peacock` binary + the Flutter-web client, the
+# DataZoo scheme (cf. escurel's release.yml): on a `v*` tag, build `peacock`
+# for Linux / Windows / macOS, smoke-test each, build the web bundle, and
+# publish a GitHub Release with the archives attached. `workflow_dispatch` runs
+# the same build + smoke + package as a DRY RUN (artifacts only, no Release).
+#
+# Unlike escurel, the `peacock` binary links NO database driver (escurel owns
+# DuckDB), so there is no libduckdb to bundle — it ships as a single
+# self-contained binary. It path-depends on escurel-client, so escurel is
+# checked out next to peacock; triton is only a dev-dependency and not needed.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+  CARGO_PROFILE_RELEASE_DEBUG: "0"
+
+jobs:
+  build:
+    name: build ${{ matrix.target_name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target_name: linux-amd64
+            archive: tar.gz
+          - os: windows-latest
+            target_name: windows-amd64
+            archive: zip
+          - os: macos-latest
+            target_name: macos-arm64
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Checkout peacock
+        uses: actions/checkout@v4
+        with:
+          path: peacock
+
+      - name: Checkout escurel (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/escurel
+          path: escurel
+          token: ${{ secrets.DATAZOO_CI_TOKEN }}
+
+      - name: Install Rust toolchain
+        working-directory: peacock
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            V="${GITHUB_REF#refs/tags/v}"
+          else
+            V="0.0.0-dev"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Inject version (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        working-directory: peacock
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          python3 - "$VERSION" <<'PY'
+          import re, sys
+          v = sys.argv[1]
+          s = open("Cargo.toml", encoding="utf-8").read()
+          s, n = re.subn(r'(?m)^version = "[^"]*"', f'version = "{v}"', s, count=1)
+          assert n == 1, "no top-level version line found in Cargo.toml"
+          open("Cargo.toml", "w", encoding="utf-8").write(s)
+          PY
+
+      # Only the production binary — no test-support/demo (which pull duckdb)
+      # and no triton (dev-only).
+      - name: Build the peacock binary
+        working-directory: peacock
+        run: cargo build --release -p peacock-bin --bin peacock
+
+      - name: Smoke test (binary runs)
+        shell: bash
+        working-directory: peacock
+        run: |
+          EXE=""
+          [[ "$RUNNER_OS" == "Windows" ]] && EXE=".exe"
+          "./target/release/peacock${EXE}" --version
+          "./target/release/peacock${EXE}" --help >/dev/null
+
+      - name: Stage + archive
+        id: archive
+        shell: bash
+        working-directory: peacock
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          STAGE="peacock-${VERSION}-${{ matrix.target_name }}"
+          mkdir -p "$STAGE"
+          EXE=""
+          [[ "$RUNNER_OS" == "Windows" ]] && EXE=".exe"
+          cp "target/release/peacock${EXE}" "$STAGE/"
+          cp ../peacock/README.md "$STAGE/" 2>/dev/null || true
+          if [[ "${{ matrix.archive }}" == "zip" ]]; then
+            7z a -tzip "${STAGE}.zip" "$STAGE" >/dev/null
+            echo "asset=peacock/${STAGE}.zip" >> "$GITHUB_OUTPUT"
+          else
+            tar czf "${STAGE}.tar.gz" "$STAGE"
+            echo "asset=peacock/${STAGE}.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peacock-${{ matrix.target_name }}
+          path: ${{ steps.archive.outputs.asset }}
+          if-no-files-found: error
+
+  web:
+    name: build the Flutter-web client
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.0.0-dev"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build bundle
+        working-directory: web/peacock-web
+        run: |
+          flutter pub get
+          flutter build web --release --base-href /app/
+      - name: Archive bundle
+        shell: bash
+        run: tar czf "peacock-web-${{ steps.ver.outputs.version }}.tar.gz" -C web/peacock-web/build web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: peacock-web
+          path: peacock-web-*.tar.gz
+          if-no-files-found: error
+
+  create-release:
+    name: create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: "peacock-*"
+          merge-multiple: true
+      - name: List assets
+        run: ls -R dist
+      - name: Create Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          MSG="$(git tag -l --format='%(contents)' "$TAG")"
+          [[ -z "$MSG" ]] && MSG="Release $TAG"
+          PRE=""
+          case "$TAG" in *-rc*|*-alpha*|*-beta*) PRE="--prerelease" ;; esac
+          gh release create "$TAG" \
+            dist/*.tar.gz dist/*.zip \
+            --title "$TAG" \
+            --notes "$MSG" \
+            $PRE

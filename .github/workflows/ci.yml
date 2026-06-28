@@ -1,22 +1,44 @@
-# peacock CI.
-#
-# Bootstrap stance (mirrors escurel): the pull_request/push triggers are
-# commented out while we iterate fast against sibling repos with local gates
-# (cargo fmt/clippy/test/build). Re-enable them before declaring v1 stable.
-#
-# peacock path-depends on its siblings escurel and triton, so CI checks them
-# out next to peacock and builds the triton binary the consumer tests spawn.
-name: ci
+name: CI
 
+# The correctness gate: fmt + clippy + test + build on Linux, on every PR and
+# every push to main / release tag — mirroring escurel's and triton's CI.
+#
+# peacock path-depends on its siblings **escurel** and **triton**, so CI checks
+# them out next to peacock and builds the `triton` binary the consumer
+# integration tests spawn. The Flutter-web client is built as a separate step.
+# Cross-platform RELEASE binaries live in release.yml (v* tags only).
 on:
   workflow_dispatch:
-  # pull_request:
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+  RUST_BACKTRACE: short
+  # The no-mock tests statically link libduckdb (via escurel-test-support) into
+  # many test binaries; full debuginfo + parallel linking blows past the runner
+  # memory budget. Drop test/dev debuginfo and serialise build jobs (escurel's
+  # fix). CI-only; committed profiles and local dev builds are untouched.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_BUILD_JOBS: "1"
+  # The no-mock tests pull libduckdb transitively via escurel-test-support;
+  # download the precompiled libduckdb (~2-3 min) instead of compiling from
+  # source (~20-30 min), as escurel does. CI-only — local builds are untouched.
+  DUCKDB_DOWNLOAD_LIB: "1"
 
 jobs:
-  gate:
+  ci:
+    name: fmt + clippy + test + build
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout peacock
         uses: actions/checkout@v4
@@ -37,38 +59,57 @@ jobs:
           path: triton
           token: ${{ secrets.DATAZOO_CI_TOKEN }}
 
-      - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # rust-toolchain.toml (in peacock/) pins the channel + components.
+      - name: Install Rust toolchain
+        working-directory: peacock
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup component add rustfmt clippy
 
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: peacock
+          shared-key: peacock-duckdb-dl
+          # The libduckdb-sys build script downloads libduckdb here and bakes
+          # its path into the cached link-search output; cache it explicitly.
+          cache-directories: peacock/target/duckdb-download
+          cache-on-failure: true
 
-      # The consumer integration tests spawn the real triton binary.
+      # The consumer integration tests spawn the real `triton` binary; the
+      # harness walks up from triton/crates/triton-tests to target/debug/triton.
       - name: Build triton binary
         working-directory: triton
         run: cargo build --bin triton
 
-      - name: fmt
+      - name: cargo fmt --check
         working-directory: peacock
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
 
-      - name: clippy
+      - name: cargo clippy
         working-directory: peacock
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: test
+      - name: cargo test
         working-directory: peacock
-        run: cargo test --workspace
+        run: cargo test --workspace --all-targets
 
-      - name: build (release, linux/x86_64 is release-blocking)
+      - name: cargo build --release
         working-directory: peacock
         run: cargo build --workspace --release
 
-      # The standalone Flutter-web bundle is built and its SHA pinned into
-      # /version; the Rust binary embeds it.
-      # - name: Flutter web bundle
-      #   run: cd peacock/web/peacock-web && flutter build web --release
+  flutter:
+    name: flutter-web build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build the peacock-web bundle
+        working-directory: web/peacock-web
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+          flutter build web --release --base-href /app/
