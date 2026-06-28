@@ -54,10 +54,13 @@ holds **no database credentials**; escurel is the only data path.
 
 7. **SOLID + clean code.** Boundaries are traits; one crate per concern;
    small, well-named public APIs. Crates: `peacock-types` (artifact, params,
-   errors, principal, manifest), `peacock-core` (render core: resolve ·
-   read · compose · guardrails · rasterize), `peacock-server` (surfaces +
-   obs + lifecycle), `peacock-bin` (CLI/settings/manifest/signals),
-   `peacock-test-support` (`PeacockProcess` + Northwind fixtures).
+   errors, principal, manifest), `peacock-theme` (CSS `--pk-*` tokens, host
+   ⊕ brand composition), `peacock-core` (render core: resolve · read ·
+   compose · guardrails, with an optional wire-trace sink), `peacock-rasterizer`
+   (pure-Rust Vega-Lite → SVG → PNG + theme application), `peacock-server`
+   (surfaces + obs + lifecycle), `peacock-bin` (CLI/settings/manifest/signals),
+   `peacock-test-support` (`PeacockProcess` + Northwind fixtures + scenario
+   reports), `peacock-demo` (the Copilot-style verification demo).
 
 8. **Incremental PRs, ask don't assume.** One logical change per PR; when
    the spec is ambiguous or a cross-repo dependency is missing, raise it as
@@ -93,12 +96,17 @@ peacock path-depends on two sibling repos under `/home/jr/Projects/datazoo`:
   `POST /` + `X-Triton-Tool` + `Authorization: Bearer` + args body;
   peacock replies `2xx` with canonical A2UI `{surface:{components:[…]}}`.
   Register via `TRITON_STATIC_UPSTREAMS=render_report=host:port`.
-  **NOT YET BUILT in triton:** MCP-Apps proxying (`resources/read` of
-  `ui://`, `callServerTool`/`updateModelContext` relay) and PNG delegation
-  to peacock — specified in [`doc/triton-mcp-apps-proxying-issue.md`](doc/triton-mcp-apps-proxying-issue.md).
-  peacock's MCP-App surface is built & tested directly against peacock's own
-  real `/mcp` endpoint; the Triton-proxied variant is `#[ignore]`d pending
-  that issue.
+  MCP-Apps proxying (`resources/read` of `ui://`,
+  `callServerTool`/`updateModelContext` relay) and PNG delegation to peacock
+  — specified in [`doc/triton-mcp-apps-proxying-issue.md`](doc/triton-mcp-apps-proxying-issue.md)
+  — **landed in triton (#143)**, so the Triton-proxied path is now exercised
+  end-to-end against the real `triton` binary in
+  `crates/peacock-server/tests/triton_upstream.rs` (no longer `#[ignore]`d).
+  peacock's MCP-App surface is also tested directly against peacock's own real
+  `/mcp` endpoint. The `peacock-demo` binary spawns a real `TritonProcess` so
+  the demo's "under the hood" inspector can show a genuine captured
+  Triton→peacock dispatch (degrades gracefully if the `triton` binary is
+  absent).
 
 ## Running example (the demonstration thread)
 
