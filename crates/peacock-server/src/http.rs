@@ -227,10 +227,12 @@ fn pipeline_trace(
     json!([
         {
             "n": 1, "actor": "frontend", "kind": "ask", "title": "User asks",
+            "protocol": "Chat", "wire": "host channel (Copilot / WhatsApp / Gemini message)",
             "detail": format!("a question is typed into the {host_name} chat and handed to the agent")
         },
         {
             "n": 2, "actor": "agent", "kind": "plan", "title": "Plan + call tool",
+            "protocol": "MCP", "wire": "MCP tools/call → the MCP gateway (Triton)",
             "detail": "the agent picks the report and calls the render_report tool with absolute params",
             "code": serde_json::to_string_pretty(&json!({
                 "name": "render_report",
@@ -239,53 +241,65 @@ fn pipeline_trace(
         },
         {
             "n": 3, "actor": "triton", "kind": "route", "title": "Authorize + dispatch",
-            "detail": "terminates TLS/OIDC, mints the principal, routes to the peacock upstream (POST / · X-Triton-Tool: render_report · Bearer)"
+            "protocol": "HTTP", "wire": "POST / · X-Triton-Tool: render_report · Authorization: Bearer",
+            "detail": "terminates TLS/OIDC, mints the principal, routes to the peacock upstream (the Triton static-upstream contract)"
         },
         {
             "n": 4, "actor": "peacock", "kind": "resolve", "title": "Resolve report skill",
+            "protocol": "HTTP", "wire": "escurel-client (HTTP/JSON, Bearer-forwarded principal)",
             "detail": format!("asks escurel for [[skill::{report_id}]] — peacock holds no DSN, no DB driver")
         },
         {
             "n": 5, "actor": "escurel", "kind": "data", "title": "resolve(skill)",
+            "protocol": "HTTP", "wire": "escurel-client response (HTTP/JSON)",
             "detail": "returns the report skill: params schema, data refs, view layout, chart specs"
         },
         {
             "n": 6, "actor": "peacock", "kind": "read", "title": "Read rows",
+            "protocol": "HTTP", "wire": "escurel-client query_instance (HTTP/JSON)",
             "detail": "calls query_instance(view, params) — untrusted params travel as typed values, peacock builds no SQL string"
         },
         {
             "n": 7, "actor": "escurel", "kind": "data", "title": "query_instance",
+            "protocol": "HTTP", "wire": "escurel-client response (HTTP/JSON) — DuckDB prepared statement",
             "detail": format!("{rows} access-checked rows · :params bound as prepared-statement values · ACL enforced here (the only data path)"),
             "code": params_pretty
         },
         {
             "n": 8, "actor": "peacock", "kind": "compose", "title": "Compose A2UI v0.9",
+            "protocol": "in-proc", "wire": "peacock render core (in-process Rust)",
             "detail": format!("layout components: {}", if kinds.is_empty() { "—".into() } else { kinds.join(", ") })
         },
         {
             "n": 9, "actor": "peacock", "kind": "guardrail", "title": "Render guardrail",
+            "protocol": "in-proc", "wire": "peacock render core (in-process Rust)",
             "detail": "inline-data-only · no remote data.url · no expr/signal — an agent-authored spec can't fetch or compute beyond its rows ✓"
         },
         {
             "n": 10, "actor": "peacock", "kind": "vega", "title": format!("Vega-Lite spec · mark “{mark}”"),
+            "protocol": "in-proc", "wire": "peacock render core (in-process Rust)",
             "detail": "the named chart spec with the rows injected inline",
             "code": serde_json::to_string_pretty(&vega).unwrap_or_default()
         },
         {
             "n": 11, "actor": "peacock", "kind": "theme", "title": format!("Theme · {brand} ⊕ {host}"),
+            "protocol": "in-proc", "wire": "peacock theme registry (in-process Rust)",
             "detail": "one CSS source styles the chart tokens AND the web chrome",
             "code": theme.css.trim().to_string()
         },
         {
             "n": 12, "actor": "peacock", "kind": "raster", "title": "Rasterize → PNG",
+            "protocol": "in-proc", "wire": "peacock rasterizer (in-process Rust, no Node/Deno/network)",
             "detail": if png { "pure-Rust Vega-Lite → SVG → PNG (resvg/tiny-skia, no Node/Deno/network)" } else { "(PNG not requested on this surface)" }
         },
         {
             "n": 13, "actor": "triton", "kind": "relay", "title": "Relay surface",
+            "protocol": "HTTP→MCP", "wire": "peacock HTTP 2xx body → projected back to the agent over MCP",
             "detail": "passes the A2UI surface + structuredContent + the ui:// resource back toward the agent and host"
         },
         {
             "n": 14, "actor": "agent", "kind": "state", "title": "updateModelContext (FR-X)",
+            "protocol": "MCP", "wire": "MCP-Apps updateModelContext (compact view-state record)",
             "detail": "view state = the absolute parameter vector; the agent keeps a compact {report_id, params, summary} — no rows. peacock stays stateless.",
             "code": serde_json::to_string_pretty(&json!({
                 "report_id": report_id, "params": sc.current_params, "salient_summary": "…"
@@ -293,6 +307,7 @@ fn pipeline_trace(
         },
         {
             "n": 15, "actor": "frontend", "kind": "render", "title": "Render the card",
+            "protocol": "Chat", "wire": "host renders the A2UI surface; the ui:// iframe loads over HTTP",
             "detail": format!("{host_name} paints the themed report; a drill or follow-up loops back to the agent (step 2)")
         }
     ])
