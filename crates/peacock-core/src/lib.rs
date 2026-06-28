@@ -5,14 +5,20 @@
 //! - `skill` — the report-skill model + escurel resolution (FR-D-1);
 //! - `guardrail` — the safe Vega-Lite subset (FR-V-4);
 //! - `compose` — A2UI v0.9 + kind:vega + structuredContent (FR-R-3, FR-V);
-//! - `render` — the orchestration every surface funnels through.
+//! - `render` — the orchestration every surface funnels through;
+//! - `author` — the authoring tooling (validate / scaffold) that reuses the
+//!   parser and guardrail so an author is checked against the renderer's rules.
 
+pub mod author;
 pub mod compose;
 pub mod data;
 pub mod guardrail;
 pub mod render;
 pub mod skill;
 
+pub use author::{
+    AuthorError, parse_skill_markdown, scaffold, split_frontmatter, validate_skill_markdown,
+};
 pub use data::{Column, EscurelData, ReportData, RowSet};
 pub use render::{RenderOpts, render, render_a2ui_to_png, view_state_record};
 pub use skill::{Agg, ReportSkill, ReportSkills, ViewSpec};

@@ -5,22 +5,28 @@
 //! escurel principal (the deployment's binding); behind Triton the forwarded
 //! token would be exchanged per request.
 
+mod author;
 mod manifest;
 
 use std::sync::Arc;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use peacock_core::EscurelData;
 use peacock_server::{AppState, router};
 use peacock_types::Principal;
 use tokio::signal::unix::{SignalKind, signal};
 
+use crate::author::AuthorCmd;
 use crate::manifest::Manifest;
 
 /// peacock — the report renderer + MCP-App host.
 #[derive(Parser, Debug)]
 #[command(name = "peacock", version)]
 struct Settings {
+    /// Subcommand. With none, peacock runs as the renderer service.
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// Bind address for the service listeners.
     #[arg(long, env = "PEACOCK_BIND", default_value = "127.0.0.1:8080")]
     bind: String,
@@ -55,8 +61,24 @@ struct Settings {
     png_scale: f32,
 }
 
+/// peacock subcommands (the bare binary, with none, is the service).
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Author tooling: scaffold, validate, and preview report skills.
+    #[command(subcommand)]
+    Author(AuthorCmd),
+}
+
 #[tokio::main]
 async fn main() {
+    let settings = Settings::parse();
+
+    // The author tooling is a CLI, not the service: it does not emit the JSON
+    // service log, and it sets its own exit code.
+    if let Some(Command::Author(cmd)) = settings.command {
+        std::process::exit(author::run(cmd).await);
+    }
+
     tracing_subscriber::fmt()
         .json()
         .with_env_filter(
@@ -64,7 +86,7 @@ async fn main() {
         )
         .init();
 
-    if let Err(e) = run(Settings::parse()).await {
+    if let Err(e) = run(settings).await {
         // A boot failure is fatal and named (ACC-10).
         eprintln!("peacock: boot refused: {e}");
         std::process::exit(1);
