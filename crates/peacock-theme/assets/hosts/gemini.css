@@ -1,0 +1,16 @@
+/* Google Gemini Enterprise — Google Sans/Roboto, multicolour, very rounded. */
+:root {
+  --pk-font: "Google Sans", "Roboto", Arial, sans-serif;
+  --pk-brand: #1a73e8;
+  --pk-accent: #ea4335;
+  --pk-bg: #ffffff;
+  --pk-surface: #f8f9fa;
+  --pk-text: #202124;
+  --pk-muted: #5f6368;
+  --pk-border: #dadce0;
+  --pk-grid: #e8eaed;
+  --pk-axis: #9aa0a6;
+  --pk-radius: 16px;
+  --pk-cat-1: #1a73e8; --pk-cat-2: #ea4335; --pk-cat-3: #fbbc04;
+  --pk-cat-4: #34a853; --pk-cat-5: #a142f4; --pk-cat-6: #24c1e0;
+}

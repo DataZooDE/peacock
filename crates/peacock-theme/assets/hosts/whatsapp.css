@@ -1,0 +1,16 @@
+/* WhatsApp — chat look: green brand, beige conversation background, compact. */
+:root {
+  --pk-font: -apple-system, "Helvetica Neue", system-ui, sans-serif;
+  --pk-brand: #075e54;
+  --pk-accent: #25d366;
+  --pk-bg: #efeae2;
+  --pk-surface: #ffffff;
+  --pk-text: #111b21;
+  --pk-muted: #667781;
+  --pk-border: #d1d7db;
+  --pk-grid: #ddd6cc;
+  --pk-axis: #8696a0;
+  --pk-radius: 8px;
+  --pk-cat-1: #128c7e; --pk-cat-2: #25d366; --pk-cat-3: #34b7f1;
+  --pk-cat-4: #ffb900; --pk-cat-5: #ff6b6b; --pk-cat-6: #00a884;
+}

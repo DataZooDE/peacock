@@ -1,0 +1,6 @@
+[toolchain]
+# peacock path-depends on triton (rust-version 1.95) and escurel (1.91), so the
+# toolchain must satisfy the highest; pinned to match the local/CI build.
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

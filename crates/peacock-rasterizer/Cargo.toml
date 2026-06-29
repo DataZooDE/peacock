@@ -1,0 +1,25 @@
+[package]
+name = "peacock-rasterizer"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+peacock-types = { workspace = true }
+peacock-theme = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# Pure-Rust SVG → PNG. peacock compiles its guardrail-restricted Vega-Lite
+# subset to SVG itself (vegalite_svg), then rasterizes with resvg/tiny-skia.
+# No Node, no Deno, no network (NFR-S-5) — and no `aes`/deno dep conflict with
+# escurel. Replaces vl-convert; see the discovered note for the rationale.
+resvg = { workspace = true }
+usvg = { workspace = true }
+tiny-skia = { workspace = true }

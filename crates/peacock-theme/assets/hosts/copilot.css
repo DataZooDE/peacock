@@ -1,0 +1,16 @@
+/* Microsoft Copilot Studio — light, Segoe UI, blue/teal, gently rounded. */
+:root {
+  --pk-font: "Segoe UI", system-ui, sans-serif;
+  --pk-brand: #0f6cbd;
+  --pk-accent: #22d3c5;
+  --pk-bg: #ffffff;
+  --pk-surface: #f3f2f1;
+  --pk-text: #201f1e;
+  --pk-muted: #605e5c;
+  --pk-border: #e1dfdd;
+  --pk-grid: #e6e6e6;
+  --pk-axis: #888888;
+  --pk-radius: 12px;
+  --pk-cat-1: #4c78a8; --pk-cat-2: #f58518; --pk-cat-3: #54a24b;
+  --pk-cat-4: #e45756; --pk-cat-5: #72b7b2; --pk-cat-6: #b07aa1;
+}

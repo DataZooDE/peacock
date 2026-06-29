@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Copilot · peacock demo</title>
+<style>
+  /* The demo's tokens reference peacock's --pk-* theme tokens (injected at
+     render time via #pk-theme), falling back to the stock Copilot look. So
+     switching company/host live restyles the whole UI from one CSS source. */
+  :root {
+    --bg: var(--pk-bg, #f3f2f1);
+    --panel: var(--pk-surface, #ffffff);
+    --ink: var(--pk-text, #201f1e);
+    --ink-soft: var(--pk-muted, #605e5c);
+    --ink-faint: #8a8886;
+    --line: var(--pk-border, #edebe9);
+    --line-strong: var(--pk-border, #e1dfdd);
+    --user-bubble: #f5f5f3;
+    --accent: var(--pk-brand, #0f6cbd);
+    --accent-soft: #eff6fc;
+    --radius: var(--pk-radius, 14px);
+    --shadow: 0 1.6px 3.6px rgba(0,0,0,.08), 0 6px 18px rgba(0,0,0,.06);
+    --font: var(--pk-font, "Segoe UI", -apple-system, system-ui, "Helvetica Neue", Arial, sans-serif);
+    /* Width of the "under the hood" rail; draggable (see .insp-resizer). */
+    --insp-w: 560px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; font-family: var(--font); color: var(--ink);
+    background:
+      radial-gradient(1200px 500px at 80% -10%, rgba(34,211,197,.10), transparent 60%),
+      radial-gradient(1000px 500px at 0% 0%, rgba(232,90,173,.08), transparent 55%),
+      var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Copilot ribbon mark */
+  .mark { width: 28px; height: 28px; border-radius: 50%; flex: none;
+    background: conic-gradient(from 210deg, #1f8df0, #22d3c5, #38d39f, #f2c14e, #e85aad, #8a63d2, #1f8df0);
+    box-shadow: inset 0 0 0 5px #fff, 0 1px 2px rgba(0,0,0,.18);
+  }
+  .mark.sm { width: 22px; height: 22px; box-shadow: inset 0 0 0 4px #fff, 0 1px 2px rgba(0,0,0,.18); }
+
+  header.topbar {
+    height: 52px; display: flex; align-items: center; gap: 10px;
+    padding: 0 18px; border-bottom: 1px solid var(--line);
+    background: rgba(255,255,255,.72); backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 5;
+  }
+  .topbar .brand { font-weight: 600; letter-spacing: .2px; font-size: 15px; }
+  .topbar .ctx {
+    margin-left: auto; display: flex; gap: 8px; align-items: center;
+    font-size: 12px; color: var(--ink-soft);
+  }
+  .ctx .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid #cfe4f7; padding: 4px 10px; border-radius: 999px; font-weight: 600;
+  }
+  .ctx .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #22d3c5; box-shadow: 0 0 0 3px rgba(34,211,197,.18); }
+
+  main { max-width: 880px; margin: 0 auto; padding: 8px 20px 160px; }
+
+  /* Greeting / empty state */
+  .hero { text-align: center; padding: 56px 10px 26px; }
+  .hero .bigmark { width: 56px; height: 56px; margin: 0 auto 18px;
+    border-radius: 50%; background: conic-gradient(from 210deg, #1f8df0, #22d3c5, #38d39f, #f2c14e, #e85aad, #8a63d2, #1f8df0);
+    box-shadow: inset 0 0 0 9px #fff, 0 4px 14px rgba(0,0,0,.12); }
+  .hero h1 { font-size: 28px; font-weight: 600; margin: 0 0 6px;
+    background: linear-gradient(90deg,#1f8df0,#22d3c5,#e85aad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero p { color: var(--ink-soft); margin: 0; font-size: 15px; }
+  .suggestions { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin: 26px auto 0; max-width: 680px; }
+  .sugg { text-align: left; background: var(--panel); border: 1px solid var(--line-strong);
+    border-radius: var(--radius); padding: 14px 16px; cursor: pointer; transition: .15s;
+    box-shadow: 0 1px 1px rgba(0,0,0,.03); }
+  .sugg:hover { border-color: #c7c6c4; transform: translateY(-1px); box-shadow: var(--shadow); }
+  .sugg b { display: block; font-size: 14px; margin-bottom: 3px; }
+  .sugg span { font-size: 12.5px; color: var(--ink-faint); }
+
+  /* Messages */
+  .msg { display: flex; gap: 12px; margin: 22px 0; animation: rise .35s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .msg.user { justify-content: flex-end; }
+  .msg.user .bubble { background: var(--user-bubble); border: 1px solid var(--line-strong);
+    padding: 10px 14px; border-radius: 16px 16px 4px 16px; max-width: 70%; font-size: 14.5px; }
+  .msg.bot .avatar { margin-top: 2px; }
+  .msg.bot .body { flex: 1; min-width: 0; }
+  .msg.bot .body .say { font-size: 14.5px; line-height: 1.55; color: var(--ink); }
+  .who { font-size: 12px; color: var(--ink-faint); margin-bottom: 4px; font-weight: 600; }
+
+  /* Typing */
+  .typing { display: inline-flex; gap: 4px; padding: 6px 2px; }
+  .typing i { width: 7px; height: 7px; border-radius: 50%; background: #b3b0ad; animation: blink 1.2s infinite both; }
+  .typing i:nth-child(2){ animation-delay:.2s } .typing i:nth-child(3){ animation-delay:.4s }
+  @keyframes blink { 0%,80%,100%{ opacity:.3; transform: translateY(0) } 40%{ opacity:1; transform: translateY(-2px) } }
+
+  /* Report card (the MCP App surface) */
+  .card { margin-top: 12px; background: var(--panel); border: 1px solid var(--line-strong);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+  .card .head { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+  .card .head .t { font-weight: 600; font-size: 14.5px; }
+  .card .head .sub { font-size: 12px; color: var(--ink-faint); }
+  .badge { margin-left: auto; font-size: 11px; font-weight: 600; color: #3b6e22;
+    background: #eef7e8; border: 1px solid #d6ecc6; padding: 3px 9px; border-radius: 999px; }
+  .kpis { display: flex; gap: 12px; padding: 14px 16px 4px; flex-wrap: wrap; }
+  .kpi { flex: 1; min-width: 130px; background: linear-gradient(180deg,#fbfdff,#f4f9fe);
+    border: 1px solid #e4eef8; border-radius: 12px; padding: 12px 14px; }
+  .kpi .l { font-size: 11.5px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .4px; }
+  .kpi .v { font-size: 24px; font-weight: 700; margin-top: 3px; letter-spacing: -.3px; }
+  .kpi .v.accent { color: var(--accent); }
+  .chartwrap { padding: 8px 12px 4px; }
+  .chartwrap img { width: 100%; height: auto; display: block; border-radius: 8px; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 6px 16px 14px; }
+  .chip { font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--line-strong); background: #fff; transition: .14s; }
+  .chip:hover { border-color: var(--accent); color: var(--accent); }
+  .chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  details.tbl { border-top: 1px solid var(--line); }
+  details.tbl summary { cursor: pointer; padding: 11px 16px; font-size: 13px; color: var(--ink-soft); user-select: none; }
+  details.tbl[open] summary { color: var(--ink); font-weight: 600; }
+  .tablebox { max-height: 240px; overflow: auto; padding: 0 8px 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+  th { position: sticky; top: 0; background: #fff; color: var(--ink-soft); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Composer */
+  .composer { position: fixed; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(180deg, rgba(243,242,241,0), var(--bg) 38%); padding: 14px 20px 18px; }
+  .composer .inner { max-width: 880px; margin: 0 auto; }
+  .quick { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .quick button { font-size: 12.5px; padding: 7px 12px; border-radius: 999px; cursor: pointer;
+    background: #fff; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+  .quick button:hover { border-color: var(--accent); color: var(--accent); }
+  .inputrow { display: flex; align-items: center; gap: 8px; background: #fff;
+    border: 1px solid var(--line-strong); border-radius: 26px; padding: 6px 6px 6px 18px;
+    box-shadow: var(--shadow); }
+  .inputrow input { flex: 1; border: 0; outline: 0; font: inherit; font-size: 15px; background: transparent; color: var(--ink); }
+  .send { width: 40px; height: 40px; border: 0; border-radius: 50%; cursor: pointer; color: #fff;
+    background: linear-gradient(135deg,#1f8df0,#22d3c5); display: grid; place-items: center; transition: .15s; }
+  .send:hover { filter: brightness(1.06); transform: scale(1.04); }
+  .send:disabled { opacity: .5; cursor: default; transform: none; }
+  .foot { text-align: center; font-size: 11px; color: var(--ink-faint); margin-top: 9px; }
+  /* Theme switcher controls. */
+  .switch { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-soft); }
+  .switch select { font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 8px;
+    border: 1px solid var(--line-strong); background: #fff; color: var(--ink); cursor: pointer; }
+
+  /* "Under the hood" inspector — the render pipeline as a cross-actor swimlane:
+     columns are the architecture actors (frontend · agent · triton · peacock ·
+     escurel), the timeline runs top→bottom, and each step sits in the lane of
+     whoever performs it, so the hand-offs of work and state are visible. Hidden
+     on narrow screens; on wide ones it's a fixed right rail and the chat
+     reserves space for it (body padding-right + composer offset below). */
+  #inspector { position: fixed; top: 0; right: 0; bottom: 0; width: var(--insp-w); z-index: 6;
+    background: var(--panel); border-left: 1px solid var(--line-strong);
+    display: none; flex-direction: column; box-shadow: -8px 0 24px rgba(0,0,0,.04); }
+  /* Drag handle straddling the chat/inspector boundary. */
+  .insp-resizer { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; z-index: 8;
+    cursor: col-resize; }
+  .insp-resizer::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px;
+    background: transparent; transition: background .12s; }
+  .insp-resizer:hover::before, body.resizing .insp-resizer::before { background: var(--accent); }
+  .insp-resizer::after { content: ""; position: absolute; left: 1px; top: 50%; width: 4px; height: 30px;
+    transform: translateY(-50%); border-radius: 3px; background: var(--line-strong); }
+  .insp-resizer:hover::after, body.resizing .insp-resizer::after { background: var(--accent); }
+  body.resizing { cursor: col-resize; user-select: none; }
+  body.resizing #inspector, body.resizing main, body.resizing .composer { transition: none; }
+  .insp-head { padding: 14px 16px 11px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .insp-title { font-weight: 700; font-size: 13.5px; letter-spacing: .2px; }
+  .insp-title::before { content: "⚙  "; }
+  .insp-sub { font-size: 11.5px; color: var(--ink-faint); margin-top: 4px; line-height: 1.45; }
+  .insteps { overflow-y: auto; padding: 0 14px 32px; flex: 1; }
+  .insp-empty { color: var(--ink-faint); font-size: 12.5px; padding: 30px 6px; text-align: center; line-height: 1.5; }
+
+  /* Per-actor accent colour, shared by the lane header and its step cards. */
+  .a-frontend { --ac: #2563eb; } .a-agent { --ac: #7c3aed; } .a-triton { --ac: #d97706; }
+  .a-peacock  { --ac: #db2777; } .a-escurel { --ac: #059669; }
+
+  /* Sticky lane headers (the columns). */
+  .swim-head { display: grid; grid-template-columns: repeat(5, 1fr); position: sticky; top: 0; z-index: 3;
+    background: var(--panel); padding: 10px 0 0; border-bottom: 1px solid var(--line); }
+  .swim-head .ah { text-align: center; font-size: 10.5px; font-weight: 700; color: var(--ink);
+    margin: 0 3px; padding-bottom: 6px; border-bottom: 2.5px solid var(--ac); }
+  .swim-head .ah small { display: block; font-weight: 500; font-size: 8.5px; color: var(--ink-faint); margin-top: 2px; }
+
+  /* The lane grid: 5 columns with faint vertical rails at the boundaries. */
+  .swim { display: grid; grid-template-columns: repeat(5, 1fr); grid-auto-rows: min-content;
+    padding-top: 12px;
+    background: repeating-linear-gradient(to right,
+      transparent 0 calc(20% - 1px), var(--line-strong) calc(20% - 1px) 20%); }
+
+  .scard { margin: 0 3px 12px; background: #fff; border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--ac); border-radius: 9px; padding: 7px 8px 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05); min-width: 0; }
+  .scard .sc-top { display: flex; align-items: center; gap: 5px; margin-bottom: 3px; flex-wrap: wrap; }
+  .scard .sc-n { font-size: 9.5px; font-weight: 700; color: #fff; background: var(--ac);
+    width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+  .scard .sc-kind { font-size: 8px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+    color: var(--ac); overflow: hidden; text-overflow: ellipsis; }
+  /* Transport/protocol of the step (MCP · HTTP · in-proc · Chat). */
+  .scard .sc-proto { margin-left: auto; font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 8px; font-weight: 700; letter-spacing: .2px; padding: 1px 5px; border-radius: 5px;
+    border: 1px solid; white-space: nowrap; cursor: help; }
+  .p-mcp    { color: #6d28d9; background: #f3eefc; border-color: #e2d4f7; }
+  .p-http   { color: #1d4ed8; background: #eef3fe; border-color: #d4e0fb; }
+  .p-httpmcp{ color: #1d4ed8; background: #eef3fe; border-color: #d4e0fb; }
+  .p-inproc { color: #6b7280; background: #f3f4f6; border-color: #e3e5e9; }
+  .p-chat   { color: #0f766e; background: #e8f6f4; border-color: #cdeae6; }
+  .scard .sc-title { font-size: 11px; font-weight: 650; line-height: 1.25; overflow-wrap: anywhere; }
+  .scard .sc-detail { font-size: 10px; color: var(--ink-soft); line-height: 1.4; margin-top: 3px; overflow-wrap: anywhere; }
+
+  /* Payloads break out to the full panel width (legible JSON/CSS). */
+  .scard-pl { grid-column: 1 / -1; margin: -6px 3px 14px; }
+  .scard-pl summary { cursor: pointer; font-size: 10.5px; color: var(--accent); user-select: none;
+    list-style: none; display: inline-flex; align-items: center; gap: 5px; }
+  .scard-pl summary::-webkit-details-marker { display: none; }
+  .scard-pl summary::before { content: "▸"; font-size: 9px; }
+  .scard-pl[open] summary::before { content: "▾"; }
+  .scard-pl pre { margin: 6px 0 0; background: #1f2430; color: #d7dce5; font-size: 10.5px; line-height: 1.45;
+    border-radius: 8px; padding: 9px 11px; overflow: auto; max-height: 240px; white-space: pre;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+  @media (min-width: 1240px) {
+    body { padding-right: var(--insp-w); }
+    .composer { right: var(--insp-w); }
+    #inspector { display: flex; }
+  }
+</style>
+<style id="pk-theme"></style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="mark"></div>
+    <div class="brand">Copilot</div>
+    <div class="ctx">
+      <div class="switch" title="Corporate identity ⊕ host look — one theme styles the chart and this UI">
+        <span>Theme</span>
+        <select id="brandSel">
+          <option value="default">No brand</option>
+          <option value="company-a" selected>Acme A</option>
+          <option value="company-b">Beta B</option>
+        </select>
+        <span>in</span>
+        <select id="hostSel">
+          <option value="copilot" selected>Copilot</option>
+          <option value="whatsapp">WhatsApp</option>
+          <option value="gemini">Gemini</option>
+        </select>
+      </div>
+      <span id="ctxPill" class="pill" style="display:none"><span class="dot"></span><span id="ctxText"></span></span>
+    </div>
+  </header>
+
+  <main id="thread">
+    <section class="hero" id="hero">
+      <div class="bigmark"></div>
+      <h1>Hi, I'm your data Copilot</h1>
+      <p>Ask about your business data — I'll render live, interactive reports from your knowledge base.</p>
+      <div class="suggestions">
+        <div class="sugg" data-q="Show me monthly revenue by product category">
+          <b>📊 Monthly revenue by category</b><span>Stacked bars across 1997 · drill a category</span>
+        </div>
+        <div class="sugg" data-q="What are our best-selling products?">
+          <b>🏆 Top products</b><span>Best sellers, ranked by revenue</span>
+        </div>
+        <div class="sugg" data-q="Where do our sales come from by country?">
+          <b>🌍 Sales by country</b><span>Revenue share by destination (donut)</span>
+        </div>
+        <div class="sugg" data-q="Show the seasonality heatmap">
+          <b>🔥 Seasonality heatmap</b><span>Which categories peak in which months</span>
+        </div>
+        <div class="sugg" data-q="Do discounts drive bigger orders?">
+          <b>💸 Discounts vs order value</b><span>Scatter of discount % vs line revenue</span>
+        </div>
+        <div class="sugg" data-q="How did Beverages perform last year?">
+          <b>🔍 Drill into Beverages</b><span>Filter the revenue report to one category</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside id="inspector">
+    <div class="insp-resizer" id="inspResizer" title="Drag to resize"></div>
+    <div class="insp-head">
+      <div class="insp-title">Under the hood</div>
+      <div class="insp-sub">Who does what across the architecture. Columns are the actors; the timeline runs top→bottom, each step in the lane of whoever performs it.</div>
+    </div>
+    <div id="insteps" class="insteps">
+      <div class="swim-head" id="swimHead"></div>
+      <div class="swim" id="swimBody"></div>
+      <div class="insp-empty" id="swimEmpty">Ask a question, and the pipeline — agent → triton → peacock ⇄ escurel → back to the frontend — will appear here, step by step.</div>
+    </div>
+  </aside>
+
+  <div class="composer">
+    <div class="inner">
+      <div class="quick" id="quick"></div>
+      <div class="inputrow">
+        <input id="input" placeholder="Message Copilot" autocomplete="off" />
+        <button class="send" id="send" title="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-5 8 5 8-16-8z" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <div class="foot">peacock renders · escurel holds the data · responses are generated from live, access-checked rows</div>
+    </div>
+  </div>
+
+<script>
+// The Northwind scenarios this demo can render. Each is a distinct escurel
+// report (different question, different chart shape); `drill` marks the ones
+// that support the category filter chips.
+const REPORTS = {
+  "northwind-monthly-revenue": { icon: "📊", title: "Revenue by category", drill: "category" },
+  "northwind-top-products":    { icon: "🏆", title: "Top products by revenue" },
+  "northwind-sales-by-country":{ icon: "🌍", title: "Sales by country" },
+  "northwind-seasonality":     { icon: "🔥", title: "Revenue seasonality (heatmap)", drill: "category" },
+  "northwind-discount-vs-value":{ icon: "💸", title: "Discounts vs order value" },
+};
+const thread = document.getElementById("thread");
+const hero = document.getElementById("hero");
+const input = document.getElementById("input");
+const sendBtn = document.getElementById("send");
+const quick = document.getElementById("quick");
+const ctxPill = document.getElementById("ctxPill");
+const ctxText = document.getElementById("ctxText");
+let currentParams = { from: "1997-01-01", to: "1997-12-31", category: "ALL" };
+let currentReport = "northwind-monthly-revenue";
+let lastReport = currentReport, lastParams = null;
+
+const money = n => "$" + Number(n).toLocaleString("en-US", {maximumFractionDigits:0});
+const esc = s => String(s).replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const NUMCOL = /revenue|value|price|quantity|discount|total|count/i;
+const prettyCol = c => c.replace(/_pct$/," %").replace(/_/g," ").replace(/^./, m => m.toUpperCase());
+function fmtCell(col, v){
+  const n = Number(v);
+  if(v === null || v === undefined || (typeof v !== "number" && isNaN(n))) return esc(String(v));
+  if(/discount/i.test(col)) return n.toFixed(0) + "%";
+  if(/revenue|value|price|total/i.test(col)) return money(n);
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+// Make the inspector rail resizable against the chat: dragging the handle sets
+// --insp-w, which drives the rail width AND the chat's reserved space (body
+// padding-right + composer offset). Persisted so it survives reloads.
+(function(){
+  const root = document.documentElement;
+  const resizer = document.getElementById("inspResizer");
+  const MIN = 380, KEEP_CHAT = 420;
+  const saved = parseInt(localStorage.getItem("pk-insp-w") || "", 10);
+  if(saved) root.style.setProperty("--insp-w", saved + "px");
+  function setW(px){
+    px = Math.max(MIN, Math.min(px, window.innerWidth - KEEP_CHAT));
+    root.style.setProperty("--insp-w", px + "px");
+    localStorage.setItem("pk-insp-w", String(px));
+  }
+  let dragging = false;
+  resizer.addEventListener("mousedown", e => { dragging = true; document.body.classList.add("resizing"); e.preventDefault(); });
+  window.addEventListener("mousemove", e => { if(dragging) setW(window.innerWidth - e.clientX); });
+  window.addEventListener("mouseup", () => { if(dragging){ dragging = false; document.body.classList.remove("resizing"); } });
+  // Double-click the handle to reset to the default width.
+  resizer.addEventListener("dblclick", () => setW(560));
+})();
+
+// The architecture actors, left→right, that own the inspector's lanes.
+const ACTORS = [
+  { key: "frontend", name: "Frontend", sub: "Copilot · WhatsApp" },
+  { key: "agent",    name: "Agent",    sub: "e.g. anofox" },
+  { key: "triton",   name: "Triton",   sub: "gateway" },
+  { key: "peacock",  name: "peacock",  sub: "renderer" },
+  { key: "escurel",  name: "escurel",  sub: "data" },
+];
+
+// Render the server-provided pipeline trace as a cross-actor swimlane, so an
+// interested viewer sees who does what and where state is handed off.
+function updateInspector(trace){
+  if(!trace || !trace.length){ return; }
+  document.getElementById("swimEmpty").style.display = "none";
+  document.getElementById("swimHead").innerHTML =
+    ACTORS.map(a => `<div class="ah a-${a.key}">${a.name}<small>${a.sub}</small></div>`).join("");
+  const colOf = k => Math.max(0, ACTORS.findIndex(a => a.key === k)) + 1;
+  let row = 1, html = "";
+  trace.forEach(s => {
+    const proto = s.protocol
+      ? `<span class="sc-proto p-${s.protocol.toLowerCase().replace(/[^a-z0-9]+/g,'')}" title="${esc(s.wire||'')}">${esc(s.protocol)}</span>`
+      : "";
+    html += `<div class="scard a-${s.actor}" style="grid-column:${colOf(s.actor)};grid-row:${row}">
+        <div class="sc-top"><span class="sc-n">${s.n}</span><span class="sc-kind">${esc(s.kind)}</span>${proto}</div>
+        <div class="sc-title">${esc(s.title)}</div>
+        ${s.detail ? `<div class="sc-detail">${esc(s.detail)}</div>` : ""}
+      </div>`;
+    row++;
+    if(s.code){
+      html += `<details class="scard-pl" style="grid-row:${row}"><summary>payload — ${esc(s.actor)}</summary><pre>${esc(s.code)}</pre></details>`;
+      row++;
+    }
+  });
+  document.getElementById("swimBody").innerHTML = html;
+}
+
+function scrollDown(){ window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }); }
+
+function addUser(text){
+  hero?.remove();
+  const el = document.createElement("div");
+  el.className = "msg user";
+  el.innerHTML = `<div class="bubble"></div>`;
+  el.querySelector(".bubble").textContent = text;
+  thread.appendChild(el); scrollDown();
+}
+
+function addBot(){
+  const el = document.createElement("div");
+  el.className = "msg bot";
+  el.innerHTML = `<div class="avatar"><div class="mark sm"></div></div>
+    <div class="body"><div class="who">Copilot</div><div class="say"></div></div>`;
+  thread.appendChild(el); scrollDown();
+  return el.querySelector(".say");
+}
+
+function typing(say){ say.innerHTML = `<div class="typing"><i></i><i></i><i></i></div>`; }
+
+function kpiTile(label, value, accent){
+  return `<div class="kpi"><div class="l">${label}</div><div class="v ${accent?'accent':''}">${value}</div></div>`;
+}
+
+function renderCard(say, data, lead){
+  const report = REPORTS[currentReport] || { title: currentReport };
+  const comps = data.a2ui.components || [];
+  const rows = data.structuredContent.rows || [];
+  const params = data.structuredContent.current_params || currentParams;
+  currentParams = params;
+  const cols = rows.length ? Object.keys(rows[0]) : [];
+
+  // KPI tiles: render the report's own kpi component(s), formatted by label,
+  // plus a row-count tile — all driven by what peacock actually composed.
+  const kpis = comps.filter(c => c.kind === "kpi").map((k, i) => {
+    let val = k.value;
+    if(typeof val === "number"){
+      if(/%|discount/i.test(k.label)) val = val.toFixed(0) + "%";
+      else if(/revenue|total/i.test(k.label)) val = money(val);
+      else val = Number.isInteger(val) ? String(val) : val.toFixed(1);
+    }
+    return kpiTile(k.label, val, i === 0);
+  });
+  kpis.push(kpiTile("Rows", String(rows.length)));
+
+  const img = data.png_base64
+    ? `<div class="chartwrap"><img alt="${esc(report.title)}" src="data:image/png;base64,${data.png_base64}"/></div>` : "";
+
+  // Generic table over whatever columns this report returned.
+  const head = `<tr>${cols.map(c => `<th class="${NUMCOL.test(c)?'num':''}">${esc(prettyCol(c))}</th>`).join("")}</tr>`;
+  const trs = rows.map(r => `<tr>${cols.map(c => `<td class="${NUMCOL.test(c)?'num':''}">${fmtCell(c, r[c])}</td>`).join("")}</tr>`).join("");
+
+  // Drill chips only for category-dimension reports.
+  let chipsHtml = "";
+  if(report.drill === "category"){
+    const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
+    chipsHtml = `<div class="chips">` + allCats.map(c => {
+      const on = (params.category||"ALL") === c ? "on" : "";
+      return `<div class="chip ${on}" data-cat="${c}">${c === "ALL" ? "All categories" : c}</div>`;
+    }).join("") + `</div>`;
+  }
+
+  say.innerHTML = `
+    <div style="margin-bottom:10px">${lead}</div>
+    <div class="card">
+      <div class="head">
+        <div class="mark sm"></div>
+        <div><div class="t">${report.icon||""} ${esc(report.title)}</div><div class="sub">${rows.length} rows · 1997 · EMEA · live from escurel</div></div>
+        <div class="badge">MCP App · live</div>
+      </div>
+      <div class="kpis">${kpis.join("")}</div>
+      ${img}
+      ${chipsHtml}
+      <details class="tbl"><summary>Show data (${rows.length} rows)</summary>
+        <div class="tablebox"><table>${head}${trs}</table></div>
+      </details>
+    </div>`;
+
+  if(report.drill === "category")
+    say.querySelectorAll(".chip").forEach(ch => ch.addEventListener("click", () => drill(ch.dataset.cat)));
+
+  // context sync indicator (the agent now "knows" the view state)
+  ctxPill.style.display = "inline-flex";
+  const scope = params.category && params.category !== "ALL" ? " · " + params.category : "";
+  ctxText.textContent = `Context · ${currentReport.replace("northwind-","")}${scope}`;
+
+  // The "under the hood" rail: show how this very rendering was produced.
+  updateInspector(data.trace);
+}
+
+const brandSel = document.getElementById("brandSel");
+const hostSel = document.getElementById("hostSel");
+const pkTheme = document.getElementById("pk-theme");
+
+async function callRender(report, params){
+  const res = await fetch("/v1/render_report", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ report_id: report, params, png: true,
+                           host: hostSel.value, brand: brandSel.value })
+  });
+  if(!res.ok){ const e = await res.json().catch(()=>({message:res.statusText})); throw new Error(e.message||"render failed"); }
+  const data = await res.json();
+  // One theme, both surfaces: the chart PNG came themed; apply the same CSS to
+  // this UI so the whole report restyles to (company ⊕ host).
+  if(data.theme_css) pkTheme.textContent = data.theme_css;
+  return data;
+}
+
+// Re-render the last report when the company or host changes.
+function reTheme(){ if(lastParams !== null) showReport(lastReport, lastParams); }
+brandSel.addEventListener("change", reTheme);
+hostSel.addEventListener("change", reTheme);
+
+function leadFor(data){
+  const rows = data.structuredContent.rows || [];
+  const p = data.structuredContent.current_params || {};
+  switch(currentReport){
+    case "northwind-monthly-revenue": {
+      const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
+      if(p.category && p.category !== "ALL")
+        return `Here's <b>${p.category}</b> revenue across 1997 — <b>${money(total)}</b>. Tap another category to compare, or ask a follow-up.`;
+      return `Here's <b>monthly revenue by product category</b> for 1997 (Northwind, EMEA) — <b>${money(total)}</b> for the year. Tap a category to drill in.`;
+    }
+    case "northwind-top-products": {
+      const top = rows[0] || {};
+      return `Your <b>best-selling products</b> by net revenue. <b>${esc(top.product||"")}</b> leads with <b>${money(top.revenue||0)}</b>.`;
+    }
+    case "northwind-sales-by-country": {
+      const top = rows[0] || {};
+      return `<b>Revenue share by destination country.</b> <b>${esc(top.country||"")}</b> is the biggest market at <b>${money(top.revenue||0)}</b>.`;
+    }
+    case "northwind-seasonality":
+      return `A <b>month × category heatmap</b> — darker cells mean more revenue. Watch the seasonal peaks across 1997.`;
+    case "northwind-discount-vs-value":
+      return `<b>Discount % vs line revenue</b> — each bubble is an order line, sized by quantity. Does discounting drive bigger orders?`;
+    default:
+      return `Here's your report, rendered live from escurel.`;
+  }
+}
+
+async function showReport(report, params, userText){
+  currentReport = report; lastReport = report; lastParams = params;
+  if(userText) addUser(userText);
+  const say = addBot(); typing(say);
+  try {
+    const data = await callRender(report, params);
+    renderCard(say, data, leadFor(data));
+    showQuick();
+  } catch(e){
+    say.innerHTML = `I couldn't render that — <em>${e.message}</em>`;
+  }
+  scrollDown();
+}
+
+async function drill(cat){
+  const params = { ...currentParams, category: cat };
+  lastParams = params; lastReport = currentReport;
+  addUser(`Show ${cat === "ALL" ? "all categories" : cat}`);
+  const say = addBot(); typing(say);
+  try {
+    const data = await callRender(currentReport, params);
+    renderCard(say, data, leadFor(data));
+  } catch(e){ say.innerHTML = `Couldn't drill — <em>${e.message}</em>`; }
+  scrollDown();
+}
+
+// Quick chips: jump between the scenarios (and category drill stays available
+// via the chips under the chart for category reports).
+function showQuick(){
+  quick.innerHTML = "";
+  const jumps = [
+    ["📊 Revenue",      "northwind-monthly-revenue",  { from:"1997-01-01", to:"1997-12-31", category:"ALL" }],
+    ["🏆 Top products", "northwind-top-products",     {}],
+    ["🌍 By country",   "northwind-sales-by-country", {}],
+    ["🔥 Seasonality",  "northwind-seasonality",      { category:"ALL" }],
+    ["💸 Discounts",    "northwind-discount-vs-value",{}],
+  ];
+  jumps.forEach(([label, report, params]) => {
+    const b = document.createElement("button"); b.textContent = label;
+    b.onclick = () => showReport(report, params, label.replace(/^\S+\s/, "Show "));
+    quick.appendChild(b);
+  });
+}
+
+// Intent routing — a tiny keyword match standing in for an LLM agent picking
+// the report + params (the demo's deterministic "agent").
+function route(text){
+  const t = text.toLowerCase();
+  if(/product|best.?sell|top.?sell|leaderboard/.test(t)) return { report:"northwind-top-products", params:{} };
+  if(/countr|geograph|region|where.*(sale|revenue|come|from)/.test(t)) return { report:"northwind-sales-by-country", params:{} };
+  if(/season|heat.?map|peak|month.*categor/.test(t)) return { report:"northwind-seasonality", params:{ category:"ALL" } };
+  if(/discount|order value|bigger order/.test(t)) return { report:"northwind-discount-vs-value", params:{} };
+  const cat = ["beverages","condiments","dairy","produce","seafood"].find(c => t.includes(c));
+  if(cat){
+    const map = { dairy:"Dairy Products" };
+    const proper = map[cat] || cat[0].toUpperCase()+cat.slice(1);
+    return { report:"northwind-monthly-revenue", params:{ from:"1997-01-01", to:"1997-12-31", category:proper } };
+  }
+  return { report:"northwind-monthly-revenue", params:{ from:"1997-01-01", to:"1997-12-31", category:"ALL" } };
+}
+
+function submit(text){
+  if(!text.trim()) return;
+  const { report, params } = route(text);
+  showReport(report, params, text);
+}
+
+sendBtn.onclick = () => { const v = input.value; input.value=""; submit(v); };
+input.addEventListener("keydown", e => { if(e.key==="Enter"){ const v=input.value; input.value=""; submit(v); }});
+document.querySelectorAll(".sugg").forEach(s => s.addEventListener("click", () => submit(s.dataset.q)));
+</script>
+</body>
+</html>

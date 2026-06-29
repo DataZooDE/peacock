@@ -1,0 +1,1 @@
+DejaVuSans.ttf is vendored under the DejaVu Fonts License (a permissive, Bitstream-Vera-derived license permitting embedding and redistribution). Used for deterministic, offline text rendering in the rasterizer.

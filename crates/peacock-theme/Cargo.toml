@@ -1,0 +1,16 @@
+[package]
+name = "peacock-theme"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Deliberately dependency-light: a theme is just CSS custom properties parsed
+# into tokens. No serde/TOML — CSS is the source of truth (it styles the web
+# surfaces natively and peacock extracts the tokens it needs for the chart).

@@ -1,0 +1,66 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/peacock-types",
+    "crates/peacock-theme",
+    "crates/peacock-core",
+    "crates/peacock-rasterizer",
+    "crates/peacock-server",
+    "crates/peacock-bin",
+    "crates/peacock-test-support",
+    "crates/peacock-demo",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.91"
+version = "0.1.0"
+license = "BUSL-1.1"
+authors = ["DataZoo GmbH <hello@data-zoo.de>"]
+repository = "https://github.com/DataZooDE/peacock"
+homepage = "https://github.com/DataZooDE/peacock"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.dependencies]
+# Internal crates
+peacock-types = { path = "crates/peacock-types" }
+peacock-theme = { path = "crates/peacock-theme" }
+peacock-core = { path = "crates/peacock-core" }
+peacock-rasterizer = { path = "crates/peacock-rasterizer" }
+peacock-server = { path = "crates/peacock-server" }
+
+# Shared third-party (versions aligned with escurel/triton workspaces)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# YAML front-matter parsing for the authoring tooling (aligned with escurel's
+# escurel-md, which parses skill markdown with the same crate).
+serde_yaml_ng = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "net", "time", "io-util"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }
+tower-http = { version = "0.6", default-features = false, features = ["fs"] }
+clap = { version = "4", features = ["derive", "env"] }
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+async-trait = "0.1"
+secrecy = "0.10"
+tempfile = "3"
+toml = "0.8"
+# Pure-Rust SVG → PNG (no Node, no network, NFR-S-5). peacock renders its
+# guardrail-restricted Vega-Lite subset to SVG itself, then rasterizes here.
+resvg = "0.47"
+usvg = "0.47"
+tiny-skia = "0.12"
+base64 = "0.22"
+
+# Cross-repo path dependencies (see CLAUDE.md "Cross-repo dependencies").
+# `query_instance` merged to escurel `main` (PR #205/#206), so these now
+# point at the main escurel checkout (the feature worktree is gone).
+escurel-client = { path = "../escurel/crates/escurel-client" }
+escurel-types = { path = "../escurel/crates/escurel-types" }
+escurel-test-support = { path = "../escurel/crates/escurel-test-support" }
+triton-tests = { path = "../triton/crates/triton-tests" }

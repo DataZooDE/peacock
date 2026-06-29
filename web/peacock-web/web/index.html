@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    Robust subpath serving (peacock issue #1: CanvasKit/assets 404 at `/app/`).
+
+    Flutter resolves `main.dart.js`, `flutter.js`, `canvaskit/` and `assets/`
+    relative to the document's <base href>. peacock serves this same bundle at
+    two mount points — `/app/` (the standalone client) and, nested under a host
+    iframe, at whatever path the host gives it — so a build-time `--base-href`
+    is fragile (the build step had to *remember* the mount path).
+
+    Instead we set the base href **at runtime** to the directory the document
+    was loaded from. `document.baseURI` / `location.pathname` always reflects the
+    real mount, so the bundle is mount-agnostic: `flutter build web` with the
+    default base href just works at `/`, `/app/`, or any nested path. The
+    documented build step still passes `--base-href /app/` as a belt-and-braces
+    default for crawlers/no-JS, but serving no longer depends on it.
+
+    See doc/flutter-iframe-runtime-proposal.md.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+  <script>
+    // Rewrite <base> to the directory of the current document, so relative
+    // asset URLs resolve under whatever path peacock mounted the bundle at.
+    (function () {
+      var path = window.location.pathname;
+      // Directory of the document: keep the trailing slash; if the URL ends in
+      // a file (…/index.html) strip the file segment.
+      if (!path.endsWith('/')) {
+        path = path.substring(0, path.lastIndexOf('/') + 1);
+      }
+      var base = document.querySelector('base');
+      if (base) base.setAttribute('href', path);
+    })();
+  </script>
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="peacock_web">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>peacock_web</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <!--
+    You can customize the "flutter_bootstrap.js" script.
+    This is useful to provide a custom configuration to the Flutter loader
+    or to give the user feedback during the initialization process.
+
+    For more details:
+    * https://docs.flutter.dev/platform-integration/web/initialization
+  -->
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
