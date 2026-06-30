@@ -41,9 +41,30 @@ async fn spawn_triton(peacock_addr: &str) -> Option<TritonProcess> {
             format!("render_report={peacock_addr}"),
         ),
     ]);
-    let triton = TritonProcess::spawn_with_env(Duration::from_secs(15), env).await;
-    eprintln!("peacock-demo: real Triton up at {}", triton.mcp_url("/"));
-    Some(triton)
+    // `TritonProcess::spawn_with_env` *panics* on any boot problem — including
+    // its own staleness check trying to rebuild `triton-bin` from peacock's
+    // workspace (where that package doesn't exist). Run it in a task so a panic
+    // surfaces as a JoinError we can swallow: the demo then simply runs without
+    // the gateway hop instead of aborting.
+    match tokio::spawn(
+        async move { TritonProcess::spawn_with_env(Duration::from_secs(15), env).await },
+    )
+    .await
+    {
+        Ok(triton) => {
+            eprintln!("peacock-demo: real Triton up at {}", triton.mcp_url("/"));
+            Some(triton)
+        }
+        Err(e) => {
+            eprintln!(
+                "peacock-demo: could not start the real Triton ({e}); continuing \
+                 without the gateway hop — the inspector's Triton step will have no \
+                 captured payload. (Build a fresh triton binary: `cargo build --bin \
+                 triton` in ../triton.)"
+            );
+            None
+        }
+    }
 }
 
 #[tokio::main]
