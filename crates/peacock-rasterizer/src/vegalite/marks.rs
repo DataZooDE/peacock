@@ -172,6 +172,29 @@ where
     let n_series = ctx.series.len().max(1);
     let base_px = ctx.y_lin.map(0.0);
 
+    // A CONTINUOUS colour encoding (e.g. a numeric risk score) colours each bar
+    // by its OWN value on the sequential ramp — not by a discrete series. Look
+    // the value up per x-category; a nominal colour stays series-indexed
+    // (`None` ⇒ the palette by series index, as before).
+    let continuous = ctx
+        .enc
+        .color
+        .as_ref()
+        .is_some_and(super::parse::Channel::is_quantitative);
+    let color_field = ctx.enc.color.as_ref().and_then(|c| c.field.clone());
+    let x_field = ctx.enc.x.as_ref().and_then(|c| c.field.clone());
+    let color_value = |xi: usize| -> Option<f64> {
+        if !continuous {
+            return None;
+        }
+        let (cf, xf) = (color_field.as_ref()?, x_field.as_ref()?);
+        let xcat = ctx.x_cats.get(xi)?;
+        ctx.rows
+            .iter()
+            .find(|r| data::cell_string(r.get(xf)) == *xcat)
+            .map(|r| data::cell_num(r.get(cf)))
+    };
+
     if ctx.stacked {
         let mut baseline: BTreeMap<usize, f64> = BTreeMap::new();
         for xi in 0..ctx.x_cats.len() {
@@ -183,7 +206,7 @@ where
                     let x = band.band_start(xi);
                     let y0 = ctx.y_lin.map(prev);
                     let y1 = ctx.y_lin.map(nv);
-                    let color = color_for(si, None);
+                    let color = color_for(si, color_value(xi));
                     rect(svg, x, y1.min(y0), bandwidth, (y0 - y1).abs(), &color, None);
                 }
             }
@@ -195,7 +218,7 @@ where
                 if let Some(y) = ctx.agg.values.get(&(xi, si)) {
                     let x = band.band_start(xi) + bw * si as f64;
                     let top = ctx.y_lin.map(*y);
-                    let color = color_for(si, None);
+                    let color = color_for(si, color_value(xi));
                     let (yy, hh) = if top <= base_px {
                         (top, base_px - top)
                     } else {
