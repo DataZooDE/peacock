@@ -87,3 +87,41 @@ fn unsupported_mark_is_an_error() {
     spec["mark"] = json!("geoshape");
     assert!(render_vega_to_svg(&spec).is_err());
 }
+
+#[test]
+fn continuous_colour_bars_map_each_bar_to_its_value() {
+    // A quantitative colour on a BAR mark colours each bar by ITS value on the
+    // sequential ramp — not a single flat colour. High risk → red-dominant,
+    // low risk → green-dominant (the `risk` scheme).
+    let spec = json!({
+        "mark": "bar",
+        "data": { "values": [
+            { "s": "high", "v": 100, "risk": 0.95 },
+            { "s": "low",  "v": 80,  "risk": 0.05 }
+        ] },
+        "encoding": {
+            "x": { "field": "s", "type": "nominal" },
+            "y": { "field": "v", "type": "quantitative" },
+            "color": { "field": "risk", "type": "quantitative",
+                       "scale": { "scheme": "risk" } }
+        }
+    });
+    let svg = render_vega_to_svg(&spec).expect("svg");
+    // Pull every `fill="#rrggbb"` and classify.
+    let fills: Vec<(u8, u8, u8)> = svg
+        .split("fill=\"#")
+        .skip(1)
+        .filter_map(|s| {
+            let h = s.get(..6)?;
+            Some((
+                u8::from_str_radix(&h[0..2], 16).ok()?,
+                u8::from_str_radix(&h[2..4], 16).ok()?,
+                u8::from_str_radix(&h[4..6], 16).ok()?,
+            ))
+        })
+        .collect();
+    let red = fills.iter().any(|(r, g, _)| *r as i16 - *g as i16 > 40);
+    let green = fills.iter().any(|(r, g, _)| *g as i16 - *r as i16 > 40);
+    assert!(red, "high-risk bar is red-dominant; fills: {fills:?}");
+    assert!(green, "low-risk bar is green-dominant; fills: {fills:?}");
+}
