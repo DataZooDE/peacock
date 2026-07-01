@@ -164,3 +164,42 @@ fn horizontal_bar_renders_full_band_bars() {
         "3 full-band horizontal bars; heights: {heights:?}"
     );
 }
+
+#[test]
+fn nominal_axis_sorts_by_another_field() {
+    // A horizontal bar's y categories ordered by a `score` field (descending):
+    // the highest-score label sits ABOVE (smaller y) the lowest-score one.
+    let spec = json!({
+        "mark": "bar",
+        "data": { "values": [
+            { "cat": "Low",  "v": 10, "score": 0.1 },
+            { "cat": "High", "v": 20, "score": 0.9 },
+            { "cat": "Mid",  "v": 15, "score": 0.5 }
+        ] },
+        "encoding": {
+            "y": { "field": "cat", "type": "nominal",
+                   "sort": { "field": "score", "order": "descending" } },
+            "x": { "field": "v",   "type": "quantitative" }
+        }
+    });
+    let svg = render_vega_to_svg(&spec).expect("svg");
+    let label_y = |label: &str| -> f64 {
+        // The axis tick text: `<text ... y="NN" ...>label</text>`.
+        let seg = svg.split(&format!(">{label}<")).next().unwrap();
+        let y = seg
+            .rsplit("y=\"")
+            .next()
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        y.parse::<f64>().unwrap()
+    };
+    assert!(
+        label_y("High") < label_y("Mid") && label_y("Mid") < label_y("Low"),
+        "descending risk order top→bottom: High={} Mid={} Low={}",
+        label_y("High"),
+        label_y("Mid"),
+        label_y("Low")
+    );
+}

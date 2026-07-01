@@ -221,7 +221,15 @@ fn render_cartesian(
             let v = data::cell_string(r.get(yf));
             data::index_of(&mut y_cats, &v);
         }
-        apply_sort(&mut y_cats, &y_ch);
+        if let Some(mut order) = resolve_sort_order(&y_ch, yf, rows) {
+            // The y-band is inverted (index 0 at the bottom). Reverse the
+            // sort order so a `descending` sort reads top-to-bottom on screen
+            // (highest first at the TOP), matching Vega-Lite.
+            order.reverse();
+            sort_by_explicit(&mut y_cats, &order);
+        } else {
+            apply_sort(&mut y_cats, &y_ch);
+        }
     }
 
     // aggregate → (category index, series) → measure. Vertical bars/lines key
@@ -630,4 +638,32 @@ fn explicit_order(ch: &Channel) -> Option<Vec<String>> {
 
 fn sort_by_explicit(cats: &mut [String], order: &[String]) {
     cats.sort_by_key(|c| order.iter().position(|o| o == c).unwrap_or(usize::MAX));
+}
+
+/// The explicit category order for a discrete axis from its `sort` encoding:
+/// either a literal `sort: [..]` array, or `sort: {field, order}` — order the
+/// categories by ANOTHER field's value (e.g. a nominal axis sorted by a risk
+/// score), read from the rows. `None` ⇒ no explicit order (caller's default).
+fn resolve_sort_order(ch: &Channel, cat_field: &str, rows: &[Row]) -> Option<Vec<String>> {
+    match &ch.sort {
+        Some(Value::Array(a)) => Some(a.iter().map(|v| data::cell_string(Some(v))).collect()),
+        Some(Value::Object(o)) => {
+            let field = o.get("field").and_then(Value::as_str)?;
+            let descending = o.get("order").and_then(Value::as_str) == Some("descending");
+            let mut pairs: Vec<(String, f64)> = Vec::new();
+            let mut seen = std::collections::BTreeSet::new();
+            for r in rows {
+                let cat = data::cell_string(r.get(cat_field));
+                if seen.insert(cat.clone()) {
+                    pairs.push((cat, data::cell_num(r.get(field))));
+                }
+            }
+            pairs.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            if descending {
+                pairs.reverse();
+            }
+            Some(pairs.into_iter().map(|(c, _)| c).collect())
+        }
+        _ => None,
+    }
 }
