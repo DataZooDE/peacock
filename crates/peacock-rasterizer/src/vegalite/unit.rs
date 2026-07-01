@@ -102,14 +102,35 @@ fn render_cartesian(
     let user_w = spec.get("width").and_then(Value::as_f64);
     let user_h = spec.get("height").and_then(Value::as_f64);
 
+    // Horizontal bar: quantitative measure on x, categories on y. Reads far
+    // better for long category labels (supplier names) than rotated x ticks.
+    let horizontal_bar = matches!(mark, Mark::Bar) && x_ch.is_quantitative() && y_ch.discrete();
+    // A horizontal bar's y-axis carries the category text (not short numbers),
+    // so widen the left margin to fit the longest label (~7px/char, capped).
+    let m_left = if horizontal_bar {
+        let longest = y_ch
+            .field
+            .as_ref()
+            .map(|yf| {
+                rows.iter()
+                    .map(|r| data::cell_string(r.get(yf)).chars().count())
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        (M_LEFT + longest as f64 * 7.0).min(300.0)
+    } else {
+        M_LEFT
+    };
+
     let m_right = if has_legend { LEGEND_W } else { M_RIGHT_BARE };
-    let plot_w = user_w.unwrap_or(super::DEFAULT_W - M_LEFT - m_right);
+    let plot_w = user_w.unwrap_or(super::DEFAULT_W - m_left - m_right);
     let plot_h = user_h.unwrap_or(super::DEFAULT_H - M_TOP - M_BOTTOM);
-    let width = M_LEFT + plot_w + m_right;
+    let width = m_left + plot_w + m_right;
     let height = M_TOP + plot_h + M_BOTTOM;
 
-    let plot_x0 = M_LEFT;
-    let plot_x1 = M_LEFT + plot_w;
+    let plot_x0 = m_left;
+    let plot_x1 = m_left + plot_w;
     let plot_y0 = M_TOP;
     let plot_y1 = M_TOP + plot_h;
 
@@ -125,6 +146,7 @@ fn render_cartesian(
     let x_field = x_ch.field.clone();
     let x_discrete = x_ch.discrete() || x_ch.is_temporal();
     let x_quant = x_ch.is_quantitative();
+    let y_discrete = y_ch.discrete();
 
     // distinct x categories (for discrete x).
     let mut x_cats: Vec<String> = Vec::new();
@@ -152,6 +174,12 @@ fn render_cartesian(
     }
     if !color_continuous {
         series.sort();
+    } else if matches!(mark, Mark::Bar | Mark::Area) {
+        // A CONTINUOUS colour paints each datum by value on a ramp; it does NOT
+        // split a category into per-series sub-marks. Collapse to one series so
+        // bar/area layout uses the FULL band (one mark per category, coloured by
+        // its own value) — not `1/n` slivers.
+        series = vec![String::new()];
     }
 
     // Stacking applies to bar/area with a color series and quantitative y.
@@ -171,11 +199,12 @@ fn render_cartesian(
         None
     };
 
-    // For quantitative x, build a linear scale.
+    // For quantitative x, build a linear scale. A horizontal bar's measure
+    // axis is zero-based + niced (like a vertical bar's y), so `is_y = true`.
     let x_lin = if x_quant {
         let xf = x_field.clone().unwrap_or_default();
         let vals: Vec<f64> = rows.iter().map(|r| data::cell_num(r.get(&xf))).collect();
-        let (lo, hi) = continuous_domain(&vals, &x_ch, false);
+        let (lo, hi) = continuous_domain(&vals, &x_ch, horizontal_bar);
         Some(make_linear(lo, hi, plot_x0, plot_x1, &x_ch))
     } else {
         None
@@ -183,10 +212,26 @@ fn render_cartesian(
 
     // --- y domain ---
     let y_field = y_ch.field.clone();
-    let y_discrete = y_ch.discrete();
 
-    // aggregate (x_index|x_value, series) -> y, and stacked tops.
-    let agg = aggregate_points(rows, enc, &x_cats, &series, &x_ch, &y_ch, x_lin.is_some());
+    // y categories (for a discrete y axis / horizontal bars), needed before the
+    // aggregate so a horizontal bar can key its measure by y-category.
+    let mut y_cats: Vec<String> = Vec::new();
+    if y_discrete && let Some(yf) = &y_field {
+        for r in rows {
+            let v = data::cell_string(r.get(yf));
+            data::index_of(&mut y_cats, &v);
+        }
+        apply_sort(&mut y_cats, &y_ch);
+    }
+
+    // aggregate → (category index, series) → measure. Vertical bars/lines key
+    // the y-measure by x-category; a horizontal bar keys the x-measure by
+    // y-category (x and y roles swapped).
+    let agg = if horizontal_bar {
+        aggregate_points(rows, enc, &y_cats, &series, &y_ch, &x_ch, false)
+    } else {
+        aggregate_points(rows, enc, &x_cats, &series, &x_ch, &y_ch, x_lin.is_some())
+    };
 
     let (y_lo, y_hi) = if y_discrete {
         (0.0, 1.0)
@@ -211,15 +256,7 @@ fn render_cartesian(
         continuous_domain(&all, &y_ch, true)
     };
 
-    // y axis: discrete (heatmap) or continuous
-    let mut y_cats: Vec<String> = Vec::new();
-    if y_discrete && let Some(yf) = &y_field {
-        for r in rows {
-            let v = data::cell_string(r.get(yf));
-            data::index_of(&mut y_cats, &v);
-        }
-        apply_sort(&mut y_cats, &y_ch);
-    }
+    // y axis band (heatmap / horizontal bars): `y_cats` built above.
     let y_band = if y_discrete && !y_cats.is_empty() {
         Some(BandScale::band(y_cats.len(), plot_y1, plot_y0, 0.1))
     } else {
@@ -290,6 +327,7 @@ fn render_cartesian(
         y_cats: &y_cats,
         agg: &agg,
         stacked,
+        horizontal: horizontal_bar,
         mark_def,
         enc,
         rows,

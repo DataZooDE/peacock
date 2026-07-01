@@ -125,3 +125,42 @@ fn continuous_colour_bars_map_each_bar_to_its_value() {
     assert!(red, "high-risk bar is red-dominant; fills: {fills:?}");
     assert!(green, "low-risk bar is green-dominant; fills: {fills:?}");
 }
+
+#[test]
+fn horizontal_bar_renders_full_band_bars() {
+    // Categories on y, measure on x → horizontal bars. Each bar spans its full
+    // y-band (not a 1px sliver from the inverted y-range) and starts at x=0.
+    let spec = json!({
+        "mark": "bar",
+        "data": { "values": [
+            { "cat": "Alpha", "v": 100 },
+            { "cat": "Beta",  "v": 40 },
+            { "cat": "Gamma", "v": 70 }
+        ] },
+        "encoding": {
+            "y": { "field": "cat", "type": "nominal" },
+            "x": { "field": "v",   "type": "quantitative" }
+        }
+    });
+    let svg = render_vega_to_svg(&spec).expect("svg");
+    // Rect heights: the background is the tallest; the 3 bars share a full-band
+    // height well above the 1px clamp a mis-oriented render would produce.
+    let mut heights: Vec<f64> = svg
+        .split("<rect")
+        .skip(1)
+        .filter_map(|frag| {
+            let h = frag.split("height=\"").nth(1)?.split('"').next()?;
+            h.parse::<f64>().ok()
+        })
+        .collect();
+    heights.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    let max_h = heights.first().copied().unwrap_or(0.0);
+    let bars = heights
+        .iter()
+        .filter(|&&h| h > 15.0 && h < max_h * 0.9)
+        .count();
+    assert!(
+        bars >= 3,
+        "3 full-band horizontal bars; heights: {heights:?}"
+    );
+}

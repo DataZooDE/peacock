@@ -26,6 +26,11 @@ pub(crate) struct MarkCtx<'a> {
     pub y_cats: &'a [String],
     pub agg: &'a Agg,
     pub stacked: bool,
+    /// Horizontal bar orientation: categories on the y-axis (`y_band`), the
+    /// quantitative measure on the x-axis (`x_lin`). The bar `agg` is keyed by
+    /// (y-category index, series). For long category labels (e.g. supplier
+    /// names) this reads far better than rotated x-axis ticks.
+    pub horizontal: bool,
     pub mark_def: &'a MarkDef,
     pub enc: &'a Encoding,
     pub rows: &'a [Row],
@@ -164,6 +169,79 @@ fn draw_bar<F>(svg: &mut String, ctx: &MarkCtx, color_for: &F)
 where
     F: Fn(usize, Option<f64>) -> String,
 {
+    // A CONTINUOUS colour encoding (e.g. a numeric risk score) colours each bar
+    // by its OWN value on the sequential ramp — not by a discrete series. Look
+    // the value up per category (the x-field for vertical, the y-field for
+    // horizontal); a nominal colour stays series-indexed (`None` ⇒ the palette
+    // by series index, as before).
+    let continuous = ctx
+        .enc
+        .color
+        .as_ref()
+        .is_some_and(super::parse::Channel::is_quantitative);
+    let color_field = ctx.enc.color.as_ref().and_then(|c| c.field.clone());
+    let cat_channel = if ctx.horizontal {
+        &ctx.enc.y
+    } else {
+        &ctx.enc.x
+    };
+    let cat_field = cat_channel.as_ref().and_then(|c| c.field.clone());
+    let cats = if ctx.horizontal {
+        ctx.y_cats
+    } else {
+        ctx.x_cats
+    };
+    let color_value = |i: usize| -> Option<f64> {
+        if !continuous {
+            return None;
+        }
+        let (cf, catf) = (color_field.as_ref()?, cat_field.as_ref()?);
+        let cat = cats.get(i)?;
+        ctx.rows
+            .iter()
+            .find(|r| data::cell_string(r.get(catf)) == *cat)
+            .map(|r| data::cell_num(r.get(cf)))
+    };
+
+    // Horizontal: categories down the y-axis, measure along x from 0. The
+    // y-band's range is inverted (category 0 at the bottom), so its bandwidth is
+    // negative — take the absolute height and place bars from the band's centre.
+    if ctx.horizontal {
+        let (y_band, x_lin) = match (ctx.y_band, ctx.x_lin) {
+            (Some(b), Some(l)) => (b, l),
+            _ => return,
+        };
+        let bandwidth = y_band.bandwidth().abs().max(1.0);
+        let n_series = ctx.series.len().max(1);
+        let bh = bandwidth / n_series as f64;
+        let base_px = x_lin.map(0.0);
+        for yi in 0..ctx.y_cats.len() {
+            let top = y_band.center(yi) - bandwidth / 2.0;
+            for (si, _n) in ctx.series.iter().enumerate() {
+                if let Some(v) = ctx.agg.values.get(&(yi, si)) {
+                    let y = top + bh * si as f64;
+                    let tip = x_lin.map(*v);
+                    let color = color_for(si, color_value(yi));
+                    let (xx, ww) = if tip >= base_px {
+                        (base_px, tip - base_px)
+                    } else {
+                        (tip, base_px - tip)
+                    };
+                    rect(
+                        svg,
+                        xx,
+                        y,
+                        ww.max(0.0),
+                        bh.max(1.0),
+                        &color,
+                        ctx.mark_def.opacity,
+                    );
+                }
+            }
+        }
+        return;
+    }
+
     let band = match ctx.band {
         Some(b) => b,
         None => return,
@@ -171,29 +249,6 @@ where
     let bandwidth = band.bandwidth().max(1.0);
     let n_series = ctx.series.len().max(1);
     let base_px = ctx.y_lin.map(0.0);
-
-    // A CONTINUOUS colour encoding (e.g. a numeric risk score) colours each bar
-    // by its OWN value on the sequential ramp — not by a discrete series. Look
-    // the value up per x-category; a nominal colour stays series-indexed
-    // (`None` ⇒ the palette by series index, as before).
-    let continuous = ctx
-        .enc
-        .color
-        .as_ref()
-        .is_some_and(super::parse::Channel::is_quantitative);
-    let color_field = ctx.enc.color.as_ref().and_then(|c| c.field.clone());
-    let x_field = ctx.enc.x.as_ref().and_then(|c| c.field.clone());
-    let color_value = |xi: usize| -> Option<f64> {
-        if !continuous {
-            return None;
-        }
-        let (cf, xf) = (color_field.as_ref()?, x_field.as_ref()?);
-        let xcat = ctx.x_cats.get(xi)?;
-        ctx.rows
-            .iter()
-            .find(|r| data::cell_string(r.get(xf)) == *xcat)
-            .map(|r| data::cell_num(r.get(cf)))
-    };
 
     if ctx.stacked {
         let mut baseline: BTreeMap<usize, f64> = BTreeMap::new();
