@@ -259,6 +259,20 @@ const GREENS: &[(u8, u8, u8)] = &[
     (0, 109, 44),
     (0, 68, 27),
 ];
+// Green → amber → red diverging ramp (ColorBrewer RdYlGn, reversed): low value
+// = healthy green, high value = alarming red. For risk-style colouring where a
+// higher score is worse.
+const RISK: &[(u8, u8, u8)] = &[
+    (26, 152, 80),
+    (102, 189, 99),
+    (166, 217, 106),
+    (217, 239, 139),
+    (254, 224, 139),
+    (253, 174, 97),
+    (244, 109, 67),
+    (215, 48, 39),
+    (165, 0, 38),
+];
 
 thread_local! {
     /// A brand-derived sequential ramp set by the themed render path; when
@@ -281,6 +295,8 @@ pub fn sequential_color(scheme: Option<&str>, t: f64) -> String {
     let named: &[(u8, u8, u8)] = match scheme {
         Some("blues") => BLUES,
         Some("greens") => GREENS,
+        // Risk-style green→red (low = green, high = red).
+        Some("risk") | Some("redyellowgreen") | Some("greenred") => RISK,
         Some("magma") | Some("inferno") | Some("plasma") => MAGMA,
         _ => VIRIDIS,
     };
@@ -351,6 +367,32 @@ mod tests {
         assert_ne!(
             sequential_color(Some("blues"), 0.5),
             sequential_color(Some("greens"), 0.5)
+        );
+    }
+
+    #[test]
+    fn risk_scheme_runs_green_low_to_red_high() {
+        let hex = |s: &str| {
+            let h = s.trim_start_matches('#');
+            (
+                u8::from_str_radix(&h[0..2], 16).unwrap(),
+                u8::from_str_radix(&h[2..4], 16).unwrap(),
+                u8::from_str_radix(&h[4..6], 16).unwrap(),
+            )
+        };
+        // Low value = green (green channel leads), high value = red (red leads).
+        let (lr, lg, _) = hex(&sequential_color(Some("risk"), 0.0));
+        let (hr, hg, _) = hex(&sequential_color(Some("risk"), 1.0));
+        assert!(lg > lr, "low risk is green");
+        assert!(hr > hg, "high risk is red");
+        // Aliases resolve to the same ramp.
+        assert_eq!(
+            sequential_color(Some("greenred"), 0.3),
+            sequential_color(Some("risk"), 0.3)
+        );
+        assert_eq!(
+            sequential_color(Some("redyellowgreen"), 0.7),
+            sequential_color(Some("risk"), 0.7)
         );
     }
 }
