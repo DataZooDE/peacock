@@ -76,8 +76,7 @@ fn skill_order_lines(relation: &str) -> String {
          type: skill\n\
          id: nw_order_lines\n\
          description: Northwind order lines, mirrored read-only from Parquet.\n\
-         backend:\n  kind: sql_view\n  source: {{ connector: parquet_dir, relation: {relation} }}\n\
-         search_text: [category]\n\
+         backend:\n  kind: sql_view\n  source: {{ connector: parquet_dir, relation: {relation} }}\n  search_text: [category]\n\
          acl: {{ read: [{SALES_GROUP}] }}\n\
          ---\n\
          # nw_order_lines\n\
