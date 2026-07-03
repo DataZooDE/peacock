@@ -28,6 +28,9 @@ pub const NW_REPORT_SEASON: &str = "northwind-seasonality";
 /// Discount vs. line revenue (scatter/bubble over raw order lines).
 pub const NW_REPORT_DISCOUNT: &str = "northwind-discount-vs-value";
 pub const NW_QUERY_LINES: &str = "nw_order_line_values";
+/// Revenue per salesperson, ranked best-first (horizontal leaderboard).
+pub const NW_REPORT_LEADERBOARD: &str = "northwind-salesperson-leaderboard";
+pub const NW_QUERY_LEADERBOARD: &str = "nw_revenue_by_salesperson";
 
 /// Absolute path to the committed Northwind order-lines Parquet directory.
 fn order_lines_dir() -> PathBuf {
@@ -191,6 +194,25 @@ fn query_revenue_by_country() -> String {
         .to_owned()
 }
 
+/// Revenue per salesperson, ranked — drives the sales-manager leaderboard.
+fn query_revenue_by_salesperson() -> String {
+    "---\n\
+     type: instance\n\
+     skill: query\n\
+     id: nw_revenue_by_salesperson\n\
+     target: \"[[nw_order_lines::eu]]\"\n\
+     params:\n\
+     \x20 - {name: from, type: date, required: true}\n\
+     \x20 - {name: to, type: date, required: true}\n\
+     sql: \"SELECT salesperson AS salesperson, \
+     sum(unit_price * quantity * (1 - discount))::DOUBLE AS revenue FROM {{target}} \
+     WHERE order_date BETWEEN :from AND :to GROUP BY 1 ORDER BY revenue DESC\"\n\
+     ---\n\
+     # nw_revenue_by_salesperson\n\
+     Net revenue per salesperson; EMEA orders only.\n"
+        .to_owned()
+}
+
 /// Raw order lines with computed line revenue — drives the discount scatter.
 fn query_order_line_values() -> String {
     "---\n\
@@ -331,6 +353,37 @@ Does discounting drive bigger orders? Each point is one order line. EMEA only.
     .to_owned()
 }
 
+/// Who sold the most — a horizontal, best-first leaderboard. Exercises the
+/// rasterizer's horizontal bars (categories on y) + explicit `sort` by
+/// another field (peacock #4/#5).
+fn skill_report_leaderboard() -> String {
+    r#"---
+type: skill
+id: northwind-salesperson-leaderboard
+render: a2ui
+description: Northwind revenue per salesperson, ranked (EMEA, 1997).
+params:
+  from: { type: date, default: "1997-01-01" }
+  to:   { type: date, default: "1997-12-31" }
+data:
+  by_rep: "[[query::nw_revenue_by_salesperson]]"
+views:
+  - { kind: kpi,   data: by_rep, agg: max, field: revenue, label: "Top seller revenue" }
+  - { kind: vega,  data: by_rep, spec: rep_bar }
+  - { kind: table, data: by_rep }
+specs:
+  rep_bar:
+    mark: bar
+    encoding:
+      y:     { field: salesperson, type: nominal, title: Salesperson, sort: { field: revenue, order: descending } }
+      x:     { field: revenue,     type: quantitative, title: Revenue }
+      color: { field: salesperson, type: nominal }
+---
+Who sold the most, best first. Net revenue, EMEA orders only.
+"#
+    .to_owned()
+}
+
 /// A running real escurel seeded with the Northwind report.
 pub struct NorthwindEscurel {
     process: EscurelProcess,
@@ -354,10 +407,16 @@ impl NorthwindEscurel {
             .skill(NW_REPORT_COUNTRY, skill_report_country())
             .skill(NW_REPORT_SEASON, skill_report_season())
             .skill(NW_REPORT_DISCOUNT, skill_report_discount())
+            .skill(NW_REPORT_LEADERBOARD, skill_report_leaderboard())
             .instance("query", NW_QUERY_REF, query_revenue_by_category())
             .instance("query", NW_QUERY_PRODUCTS, query_revenue_by_product())
             .instance("query", NW_QUERY_COUNTRY, query_revenue_by_country())
             .instance("query", NW_QUERY_LINES, query_order_line_values())
+            .instance(
+                "query",
+                NW_QUERY_LEADERBOARD,
+                query_revenue_by_salesperson(),
+            )
             .done();
 
         let process = EscurelProcess::spawn(Opts {
