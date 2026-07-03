@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use escurel_test_support::{AuthMode, EscurelProcess, FixtureBuilder, Opts, Role};
+use escurel_test_support::{AuthMode, ConfigOverrides, EscurelProcess, FixtureBuilder, Opts, Role};
 use peacock_types::Principal;
 use secrecy::SecretString;
 use serde_json::json;
@@ -384,6 +384,23 @@ Who sold the most, best first. Net revenue, EMEA orders only.
     .to_owned()
 }
 
+/// Consumer knobs for [`NorthwindEscurel::spawn_with`]: extra fixtures
+/// merged into the Northwind seed, plus the escurel-test-support
+/// `ConfigOverrides` passthrough (webhook, `groups_claim`,
+/// `extra_issuers`, …) — so a downstream app test (e.g. the
+/// datazoo-agent-template's sales-manager e2e) can stand the whole
+/// Northwind world up in its deployed Triton-fronted shape.
+#[derive(Default)]
+pub struct NorthwindOpts {
+    /// Extra `(skill_id, markdown)` pairs seeded alongside the Northwind
+    /// skills.
+    pub extra_skills: Vec<(String, String)>,
+    /// Extra `(skill_id, instance_id, markdown)` instances.
+    pub extra_instances: Vec<(String, String, String)>,
+    /// Escurel gateway overrides, forwarded verbatim.
+    pub config_overrides: ConfigOverrides,
+}
+
 /// A running real escurel seeded with the Northwind report.
 pub struct NorthwindEscurel {
     process: EscurelProcess,
@@ -394,6 +411,12 @@ impl NorthwindEscurel {
     /// `nw_order_lines::eu` sql_view instance over the Parquet directory
     /// (admin-gated `create_sql_instance`).
     pub async fn spawn() -> Self {
+        Self::spawn_with(NorthwindOpts::default()).await
+    }
+
+    /// [`NorthwindEscurel::spawn`] with consumer knobs — extra fixtures and
+    /// gateway `ConfigOverrides`.
+    pub async fn spawn_with(opts: NorthwindOpts) -> Self {
         let relation = order_lines_dir();
         let relation = relation.to_str().expect("utf-8 path");
 
@@ -416,13 +439,20 @@ impl NorthwindEscurel {
                 "query",
                 NW_QUERY_LEADERBOARD,
                 query_revenue_by_salesperson(),
-            )
-            .done();
+            );
+        let mut fixtures = fixtures;
+        for (skill, md) in &opts.extra_skills {
+            fixtures = fixtures.skill(skill, md.clone());
+        }
+        for (skill, id, md) in &opts.extra_instances {
+            fixtures = fixtures.instance(skill, id, md.clone());
+        }
+        let fixtures = fixtures.done();
 
         let process = EscurelProcess::spawn(Opts {
             auth: AuthMode::TestIssuer,
             fixtures: Some(fixtures),
-            ..Default::default()
+            config_overrides: opts.config_overrides,
         })
         .await;
 
@@ -451,6 +481,21 @@ impl NorthwindEscurel {
         escurel_client::Client::connect(self.endpoint(), SecretString::from(self.sales_token()))
             .await
             .expect("connect sales client")
+    }
+
+    /// Mint a bearer with explicit groups against the gateway's own
+    /// TestIssuer — for consumer-owned principals (a worker's service
+    /// token, an extra analyst). Claim-aware when a custom `groups_claim`
+    /// was configured via [`NorthwindOpts`].
+    pub fn mint_token_with_groups(
+        &self,
+        tenant: &str,
+        subject: &str,
+        groups: &[&str],
+        admin: bool,
+    ) -> String {
+        self.process
+            .mint_token_with_groups(tenant, subject, groups, admin)
     }
 
     fn sales_token(&self) -> String {
