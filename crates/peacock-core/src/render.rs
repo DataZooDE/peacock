@@ -150,19 +150,102 @@ where
         opts.mosaic_threshold,
     )?;
 
-    // 6. Optionally rasterize the first chart to PNG (chat / embedded preview),
-    //    themed with the resolved corporate identity ⊕ host look when set.
-    if let Some(scale) = opts.png_scale
-        && let Some(spec) = artifact.vega_specs.first()
-    {
-        let png = match &opts.theme {
-            Some(theme) => peacock_rasterizer::render_vega_to_png_themed(spec, scale, theme)?,
-            None => peacock_rasterizer::render_vega_to_png(spec, scale)?,
-        };
-        artifact.png = Some(png);
+    // 6. Optionally rasterize to PNG (chat / embedded preview), themed with
+    //    the resolved corporate identity ⊕ host look when set: the first
+    //    chart when the report has one, else the INSTANCE CARD (title +
+    //    facts + body + activity) for a chartless instance report — every
+    //    surface Triton fronts gets a usable image.
+    if let Some(scale) = opts.png_scale {
+        if let Some(spec) = artifact.vega_specs.first() {
+            let png = match &opts.theme {
+                Some(theme) => peacock_rasterizer::render_vega_to_png_themed(spec, scale, theme)?,
+                None => peacock_rasterizer::render_vega_to_png(spec, scale)?,
+            };
+            artifact.png = Some(png);
+        } else if let Some(req) = instance_card_request(&skill, &pages) {
+            let png = match &opts.theme {
+                Some(theme) => {
+                    peacock_rasterizer::render_instance_card_to_png_themed(&req, scale, theme)?
+                }
+                None => peacock_rasterizer::render_instance_card_to_png(&req, scale)?,
+            };
+            artifact.png = Some(png);
+        }
     }
 
     Ok(artifact)
+}
+
+/// Build the chat card from the report's FIRST instance alias (deterministic
+/// via the ordered `instances` map), carrying only what the views selected —
+/// facts from the first `frontmatter` view, body from the `markdown` view,
+/// activity from the `timeline` view. `None` when the report has no
+/// instances (a row report without a chart stays PNG-less, as before).
+fn instance_card_request(
+    skill: &crate::skill::ReportSkill,
+    pages: &BTreeMap<String, InstancePage>,
+) -> Option<peacock_rasterizer::InstanceCardRequest> {
+    use crate::skill::ViewSpec;
+
+    let (alias, page) = skill
+        .instances
+        .keys()
+        .next()
+        .and_then(|a| pages.get(a).map(|p| (a.clone(), p)))?;
+
+    let display = |v: &Value| match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    let mut req = peacock_rasterizer::InstanceCardRequest {
+        title: page
+            .frontmatter
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or(&page.id)
+            .to_owned(),
+        subtitle: format!("{} · {}", page.skill, page.id),
+        ..Default::default()
+    };
+    for view in &skill.views {
+        match view {
+            ViewSpec::Frontmatter { instance, keys, .. }
+                if *instance == alias && req.facts.is_empty() =>
+            {
+                req.facts = keys
+                    .iter()
+                    .filter_map(|k| page.frontmatter.get(k).map(|v| (k.clone(), display(v))))
+                    .collect();
+            }
+            ViewSpec::Markdown { instance } if *instance == alias => {
+                req.body_lines = page
+                    .body
+                    .lines()
+                    .map(str::trim)
+                    .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                    .map(str::to_owned)
+                    .collect();
+            }
+            ViewSpec::Timeline { instance, limit } if *instance == alias => {
+                req.events = page
+                    .events
+                    .iter()
+                    .take(*limit as usize)
+                    .map(|e| {
+                        let body_first = e.body.lines().next().unwrap_or_default();
+                        let when = if e.at.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" · {}", e.at)
+                        };
+                        (e.title.clone(), format!("{}{when} · {body_first}", e.label))
+                    })
+                    .collect();
+            }
+            _ => {}
+        }
+    }
+    Some(req)
 }
 
 /// Rasterize a single Vega-Lite chart spec to PNG — the `render_a2ui_to_png`

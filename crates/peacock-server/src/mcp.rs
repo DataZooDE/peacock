@@ -51,7 +51,7 @@ pub async fn handle(
     let result = match method {
         "initialize" => Ok(initialize()),
         "tools/list" => Ok(tools_list()),
-        "tools/call" => tools_call(&state, &params).await,
+        "tools/call" => tools_call(&state, host, &params).await,
         "resources/read" => resources_read(&state, host, &params),
         "updateModelContext" => Ok(json!({ "ok": true })),
         other => Err(Error::validation(format!("unknown method `{other}`"))),
@@ -93,7 +93,7 @@ fn tools_list() -> Value {
 /// `tools/call render_report` → the artifact's structuredContent + the linked
 /// UI resource (`_meta.ui.resourceUri`, FR-M-2). A drill is just this call
 /// with new absolute params (FR-M-3).
-async fn tools_call(state: &AppState, params: &Value) -> Result<Value, Error> {
+async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Value, Error> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     if name != "render_report" {
         return Err(Error::validation(format!("unknown tool `{name}`")));
@@ -105,8 +105,13 @@ async fn tools_call(state: &AppState, params: &Value) -> Result<Value, Error> {
         .ok_or_else(|| Error::validation("arguments.report_id is required"))?;
     let report_params = args.get("params").cloned().unwrap_or(json!({}));
 
+    // Apply styling on THIS endpoint too (not just the HTTP demo path): the
+    // rasterized chart / instance card carries the resolved corporate
+    // identity ⊕ host look. Unknown names resolve to the stock palette.
+    let theme = state.themes.resolve(&state.principal.tenant, host);
     let opts = RenderOpts {
         png_scale: Some(state.png_scale),
+        theme: Some(theme.tokens),
         ..Default::default()
     };
     let art = render(

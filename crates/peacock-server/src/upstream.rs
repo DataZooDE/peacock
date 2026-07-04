@@ -56,7 +56,11 @@ pub async fn handle(
                 "body": body
             }));
         }
-        return tool_call(&state, tool, body).await;
+        let host = headers
+            .get(axum::http::header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        return tool_call(&state, host, tool, body).await;
     }
     if let Some(op) = headers.get("x-triton-mcp").and_then(|v| v.to_str().ok()) {
         // The proxied host flavor rides the Host header (Triton forwards it);
@@ -88,9 +92,9 @@ pub async fn handle(
         .into_response()
 }
 
-async fn tool_call(state: &AppState, tool: &str, args: Value) -> Response {
+async fn tool_call(state: &AppState, host: &str, tool: &str, args: Value) -> Response {
     match tool {
-        "render_report" => render_report_tool(state, args).await,
+        "render_report" => render_report_tool(state, host, args).await,
         // Part D (#143 D): rasterize Triton's dashboard `{title, tiles}` to a
         // PNG and return it base64-encoded — the capability Triton's chat
         // surface delegates to via TRITON_RASTERIZE_UPSTREAM.
@@ -136,7 +140,7 @@ fn render_a2ui_to_png(state: &AppState, args: Value) -> Response {
     }
 }
 
-async fn render_report_tool(state: &AppState, args: Value) -> Response {
+async fn render_report_tool(state: &AppState, host: &str, args: Value) -> Response {
     let report_id = match args.get("report_id").and_then(Value::as_str) {
         Some(r) => r.to_owned(),
         None => {
@@ -148,8 +152,12 @@ async fn render_report_tool(state: &AppState, args: Value) -> Response {
         }
     };
     let report_params = args.get("params").cloned().unwrap_or(json!({}));
+    // Apply styling on the Triton-dispatched path too: the PNG (chart or
+    // instance card) carries the resolved corporate identity ⊕ host look.
+    let theme = state.themes.resolve(&state.principal.tenant, host);
     let opts = RenderOpts {
         png_scale: Some(state.png_scale),
+        theme: Some(theme.tokens),
         ..Default::default()
     };
     match render(

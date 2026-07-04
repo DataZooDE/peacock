@@ -121,6 +121,17 @@ pub fn render_vega_to_png_themed(
     crate::render_svg_to_png(&render_vega_to_svg_themed(spec, theme)?, scale)
 }
 
+/// Render an instance card to PNG, restyled with `theme` (the card shares
+/// the dashboard's stock palette, so the same replacement map applies).
+pub fn render_instance_card_to_png_themed(
+    req: &crate::card::InstanceCardRequest,
+    scale: f32,
+    theme: &ThemeTokens,
+) -> Result<Vec<u8>, RasterError> {
+    let svg = apply_dashboard_theme(&crate::card::render_instance_card_to_svg(req), theme);
+    crate::render_svg_to_png(&svg, scale)
+}
+
 /// Render a dashboard to PNG, restyled with `theme`.
 pub fn render_dashboard_to_png_themed(
     req: &DashboardRequest,
