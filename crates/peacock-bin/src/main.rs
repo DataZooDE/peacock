@@ -59,6 +59,13 @@ struct Settings {
     /// Chart PNG scale for the chat surface.
     #[arg(long, env = "PEACOCK_PNG_SCALE", default_value = "2.0")]
     png_scale: f32,
+
+    /// Path to this deployment's brand CSS (`--pk-*` custom properties —
+    /// colours, `--pk-name`, `--pk-logo`, `--pk-logo-style`). Registered at
+    /// boot under the deployment tenant, so `resolve(tenant, host)` finds it.
+    /// Peacock owns ALL theming; chat adapters fetch it via `get_theme`.
+    #[arg(long, env = "PEACOCK_BRAND_CSS")]
+    brand_css: Option<String>,
 }
 
 /// peacock subcommands (the bare binary, with none, is the service).
@@ -122,6 +129,17 @@ async fn run(s: Settings) -> Result<(), String> {
         trace_id: String::new(),
     };
 
+    // The deployment's brand: one CSS file of `--pk-*` tokens, registered
+    // under the tenant so every resolve site (PNG, iframe, get_theme) finds
+    // it. An unreadable path is a fatal, named boot failure (ACC-10) — a
+    // deployment that configures a brand must actually get it.
+    let mut themes = peacock_rasterizer::ThemeRegistry::builtin();
+    if let Some(path) = &s.brand_css {
+        let css = std::fs::read_to_string(path)
+            .map_err(|e| format!("reading PEACOCK_BRAND_CSS {path}: {e}"))?;
+        themes.register_brand(&s.tenant, css);
+    }
+
     let state = Arc::new(AppState {
         escurel: EscurelData::new(escurel_url),
         principal,
@@ -130,7 +148,7 @@ async fn run(s: Settings) -> Result<(), String> {
                     POST /v1/render_report or /mcp.</p>",
         flutter_dir: None,
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes,
         triton_url: None,
         upstream_capture: Default::default(),
     });

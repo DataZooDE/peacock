@@ -86,3 +86,29 @@ fn unknown_names_fall_back_to_defaults() {
     let t = reg.resolve("nope", "nope");
     assert_eq!(t.tokens, ThemeTokens::default());
 }
+
+#[test]
+fn logo_style_parses_and_defaults_to_avatar() {
+    use peacock_theme::LogoStyle;
+
+    // Absent → avatar (the small round header image).
+    let t = peacock_theme::ThemeTokens::default();
+    assert_eq!(t.logo_style, LogoStyle::Avatar);
+
+    // `--pk-logo-style: banner` → banner (full-width wordmark).
+    let vars = peacock_theme::parse_vars(
+        ":root { --pk-logo: https://brand.example/logo.png; --pk-logo-style: banner; }",
+    );
+    let t = peacock_theme::ThemeTokens::from_vars(&vars);
+    assert_eq!(t.logo_style, LogoStyle::Banner);
+    assert_eq!(t.logo.as_deref(), Some("https://brand.example/logo.png"));
+
+    // Junk value → default, never an error (theming never fails a request).
+    let vars = peacock_theme::parse_vars(":root { --pk-logo-style: sideways; }");
+    let t = peacock_theme::ThemeTokens::from_vars(&vars);
+    assert_eq!(t.logo_style, LogoStyle::Avatar);
+
+    // Wire names for the chrome consumers.
+    assert_eq!(LogoStyle::Avatar.as_str(), "avatar");
+    assert_eq!(LogoStyle::Banner.as_str(), "banner");
+}
