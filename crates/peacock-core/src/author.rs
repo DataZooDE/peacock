@@ -196,10 +196,13 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
         }
     }
 
-    // 3. Cross-references between data / views / specs.
+    // 3. Cross-references between data / instances / views / specs.
     let declared_aliases: std::collections::BTreeSet<&str> =
         skill.data.keys().map(String::as_str).collect();
+    let declared_instances: std::collections::BTreeSet<&str> =
+        skill.instances.keys().map(String::as_str).collect();
     let mut used_aliases = std::collections::BTreeSet::new();
+    let mut used_instances = std::collections::BTreeSet::new();
 
     for view in &skill.views {
         let (data, specs) = view_refs(view);
@@ -209,6 +212,18 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
                 line0,
                 format!("a view references data alias `{data}`, which is not declared in `data:`"),
             ));
+        }
+        if let Some(instance) = view_instance_ref(view) {
+            used_instances.insert(instance);
+            if !declared_instances.contains(instance) {
+                errors.push(AuthorError::at(
+                    line0,
+                    format!(
+                        "a view references instance alias `{instance}`, \
+                         which is not declared in `instances:`"
+                    ),
+                ));
+            }
         }
         for spec_name in specs {
             if !skill.specs.contains_key(spec_name) {
@@ -225,6 +240,14 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
             errors.push(AuthorError::at(
                 line0,
                 format!("data alias `{alias}` is declared but no view references it"),
+            ));
+        }
+    }
+    for alias in &declared_instances {
+        if !used_instances.contains(*alias) {
+            errors.push(AuthorError::at(
+                line0,
+                format!("instance alias `{alias}` is declared but no view references it"),
             ));
         }
     }
@@ -245,7 +268,8 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
     errors
 }
 
-/// The `(data alias, [spec names])` a view references.
+/// The `(data alias, [spec names])` a view references. Instance views carry
+/// no data alias — theirs is [`view_instance_ref`].
 fn view_refs(view: &ViewSpec) -> (&str, Vec<&str>) {
     match view {
         ViewSpec::Kpi { data, .. } => (data.as_str(), Vec::new()),
@@ -261,6 +285,16 @@ fn view_refs(view: &ViewSpec) -> (&str, Vec<&str>) {
             }
             (data.as_str(), specs)
         }
+        ViewSpec::Markdown { .. } | ViewSpec::Frontmatter { .. } => ("", Vec::new()),
+    }
+}
+
+/// The `instances:` alias an instance view references, if any.
+fn view_instance_ref(view: &ViewSpec) -> Option<&str> {
+    match view {
+        ViewSpec::Markdown { instance } => Some(instance.as_str()),
+        ViewSpec::Frontmatter { instance, .. } => Some(instance.as_str()),
+        _ => None,
     }
 }
 

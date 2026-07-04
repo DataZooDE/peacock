@@ -48,6 +48,7 @@ fn report(specs: Value, views: Vec<ViewSpec>) -> ReportSkill {
             ParamSpec::new(ParamType::String).with_default(json!("ALL")),
         )]),
         data,
+        instances: BTreeMap::new(),
         views,
         specs: specs.as_object().unwrap().clone().into_iter().collect(),
         narrative: "EMEA orders only.".into(),
@@ -100,6 +101,7 @@ fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
         &params(),
         &json!({}),
         &rows_map(),
+        &BTreeMap::new(),
         DEFAULT_MAX_ROWS,
         None,
     )
@@ -153,6 +155,7 @@ fn guardrail_rejects_remote_data_url() {
         &params(),
         &json!({}),
         &rows_map(),
+        &BTreeMap::new(),
         DEFAULT_MAX_ROWS,
         None,
     )
@@ -178,6 +181,7 @@ fn guardrail_rejects_expression_escape_hatch() {
         &params(),
         &json!({}),
         &rows_map(),
+        &BTreeMap::new(),
         DEFAULT_MAX_ROWS,
         None,
     )
@@ -194,7 +198,16 @@ fn oversize_result_set_is_a_bounded_render_error() {
             data: "rev_by_cat".into(),
         }],
     );
-    let err = compose(&skill, &params(), &json!({}), &rows_map(), 2, None).unwrap_err();
+    let err = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        &BTreeMap::new(),
+        2,
+        None,
+    )
+    .unwrap_err();
     assert_eq!(err.kind(), "render");
 }
 
@@ -219,6 +232,7 @@ fn composition_is_pure_same_inputs_same_artifact() {
         &params(),
         &json!({}),
         &rows_map(),
+        &BTreeMap::new(),
         DEFAULT_MAX_ROWS,
         None,
     )
@@ -228,9 +242,162 @@ fn composition_is_pure_same_inputs_same_artifact() {
         &params(),
         &json!({}),
         &rows_map(),
+        &BTreeMap::new(),
         DEFAULT_MAX_ROWS,
         None,
     )
     .unwrap();
     assert_eq!(a, b);
+}
+
+// ── instance views (markdown / frontmatter) ──
+
+fn account_page() -> peacock_core::InstancePage {
+    peacock_core::InstancePage {
+        page_id: "markdown/instances/account/beverages-gmbh.md".into(),
+        skill: "account".into(),
+        id: "beverages-gmbh".into(),
+        frontmatter: json!({
+            "id": "beverages-gmbh", "name": "Beverages GmbH",
+            "status": "follow_up", "email": "maria@beverages.example",
+        }),
+        body: "# Beverages GmbH\n\nEU distributor.".into(),
+    }
+}
+
+fn instance_skill(views: Vec<ViewSpec>) -> ReportSkill {
+    let mut instances = BTreeMap::new();
+    instances.insert(
+        "acct".to_string(),
+        peacock_core::InstanceRef {
+            skill: "account".into(),
+            id_template: "{account}".into(),
+        },
+    );
+    ReportSkill {
+        id: "customer-report".into(),
+        params: ParamSchema::from_specs([("account", ParamSpec::new(ParamType::String))]),
+        data: BTreeMap::new(),
+        instances,
+        views,
+        specs: BTreeMap::new(),
+        narrative: String::new(),
+    }
+}
+
+#[test]
+fn composes_markdown_and_frontmatter_components() {
+    let skill = instance_skill(vec![
+        ViewSpec::Frontmatter {
+            instance: "acct".into(),
+            // `category` is absent on the page — silently omitted, declared
+            // order kept for the rest.
+            keys: vec!["name".into(), "category".into(), "status".into()],
+            label: "Account".into(),
+        },
+        ViewSpec::Markdown {
+            instance: "acct".into(),
+        },
+    ]);
+    let mut pages = BTreeMap::new();
+    pages.insert("acct".to_string(), account_page());
+    let params: BTreeMap<String, ParamValue> =
+        [("account".to_string(), ParamValue(json!("beverages-gmbh")))].into();
+
+    let art = compose(
+        &skill,
+        &params,
+        &json!({}),
+        &BTreeMap::new(),
+        &pages,
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+    let comps = art.a2ui["components"].as_array().unwrap();
+    let facts = comps.iter().find(|c| c["kind"] == "frontmatter").unwrap();
+    let keys: Vec<&str> = facts["facts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        keys,
+        vec!["name", "status"],
+        "absent key omitted, order kept"
+    );
+    let md = comps.iter().find(|c| c["kind"] == "markdown").unwrap();
+    assert_eq!(md["value"], "# Beverages GmbH\n\nEU distributor.");
+    // The typed contract mirrors the views, keyed by alias.
+    let inst = art.structured_content.instances.unwrap();
+    assert_eq!(inst["acct"]["id"], "beverages-gmbh");
+    assert_eq!(inst["acct"]["facts"].as_array().unwrap().len(), 2);
+    assert!(
+        inst["acct"]["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("EU distributor")
+    );
+}
+
+#[test]
+fn unbound_instance_alias_is_a_render_error() {
+    let skill = instance_skill(vec![ViewSpec::Markdown {
+        instance: "ghost".into(),
+    }]);
+    let mut pages = BTreeMap::new();
+    pages.insert("acct".to_string(), account_page());
+    let err = compose(
+        &skill,
+        &BTreeMap::new(),
+        &json!({}),
+        &BTreeMap::new(),
+        &pages,
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(err.kind(), "render");
+}
+
+#[test]
+fn duplicate_alias_across_data_and_instances_is_rejected() {
+    // One shared alias namespace, disjoint by construction.
+    let fm = json!({
+        "params": { "account": { "type": "string" } },
+        "data": { "x": "[[query::q1]]" },
+        "instances": { "x": "[[account::{account}]]" },
+        "views": [],
+    });
+    let err = ReportSkill::from_frontmatter("dup-report", &fm, "").unwrap_err();
+    assert_eq!(err.kind(), "render");
+    assert!(
+        err.to_string().contains("both `data:` and `instances:`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn row_artifacts_serialize_without_an_instances_key() {
+    // Byte-compatibility: a report with no `instances:` must not grow a new
+    // structuredContent key.
+    let skill = report(
+        json!({ "rev_line": rev_line_spec() }),
+        vec![ViewSpec::Table {
+            data: "rev_by_cat".into(),
+        }],
+    );
+    let art = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        &BTreeMap::new(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+    let sc = serde_json::to_value(&art.structured_content).unwrap();
+    assert!(sc.get("instances").is_none(), "{sc}");
 }

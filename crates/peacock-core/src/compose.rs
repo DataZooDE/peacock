@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 use crate::data::RowSet;
 use crate::guardrail::{check_mosaic_source, check_vega_spec};
+use crate::instance::InstancePage;
 use crate::skill::{Agg, ReportSkill, ViewSpec};
 
 /// Default cap on rows a single view may carry into a rendered artifact
@@ -29,6 +30,7 @@ pub fn compose(
     params: &BTreeMap<String, ParamValue>,
     bound: &Value,
     rows: &BTreeMap<String, RowSet>,
+    pages: &BTreeMap<String, InstancePage>,
     max_rows: usize,
     mosaic_threshold: Option<usize>,
 ) -> Result<Artifact> {
@@ -127,6 +129,35 @@ pub fn compose(
                     "rows": rs.rows.clone(),
                 }));
             }
+            ViewSpec::Markdown { instance } => {
+                let page = instance_page(pages, instance)?;
+                // The body rides RAW — encoding is strictly the renderer's
+                // job (the iframe escapes; a chat mapper strips).
+                components.push(json!({ "kind": "markdown", "value": page.body }));
+            }
+            ViewSpec::Frontmatter {
+                instance,
+                keys,
+                label,
+            } => {
+                let page = instance_page(pages, instance)?;
+                // Declared order; an absent key is silently omitted
+                // (instances vary). Zero facts still emit — the layout is
+                // deterministic, never data-dependent (ADR-P7).
+                let facts: Vec<Value> = keys
+                    .iter()
+                    .filter_map(|k| {
+                        page.frontmatter
+                            .get(k)
+                            .map(|v| json!({ "key": k, "value": v }))
+                    })
+                    .collect();
+                components.push(json!({
+                    "kind": "frontmatter",
+                    "label": label,
+                    "facts": facts,
+                }));
+            }
         }
     }
 
@@ -147,6 +178,7 @@ pub fn compose(
         },
         param_schema: serde_json::to_value(&skill.params).unwrap_or(Value::Null),
         current_params: params_to_json(params),
+        instances: instances_content(skill, pages),
     };
 
     Ok(Artifact {
@@ -186,6 +218,53 @@ fn series_count(skill: &ReportSkill, spec: &str, rs: &RowSet) -> usize {
 fn rowset<'a>(rows: &'a BTreeMap<String, RowSet>, alias: &str) -> Result<&'a RowSet> {
     rows.get(alias)
         .ok_or_else(|| Error::render(format!("view references unbound data alias `{alias}`")))
+}
+
+fn instance_page<'a>(
+    pages: &'a BTreeMap<String, InstancePage>,
+    alias: &str,
+) -> Result<&'a InstancePage> {
+    pages
+        .get(alias)
+        .ok_or_else(|| Error::render(format!("view references unbound instance alias `{alias}`")))
+}
+
+/// The instance contract for structuredContent, built FROM THE VIEWS (data
+/// minimality): a facts view contributes its selected keys, a markdown view
+/// the body — never the raw full frontmatter. `None` when the report
+/// declares no instances, so row-report artifacts stay byte-identical.
+fn instances_content(skill: &ReportSkill, pages: &BTreeMap<String, InstancePage>) -> Option<Value> {
+    if skill.instances.is_empty() {
+        return None;
+    }
+    let mut out = serde_json::Map::new();
+    for (alias, page) in pages {
+        let mut entry = serde_json::Map::new();
+        entry.insert("skill".to_owned(), json!(page.skill));
+        entry.insert("id".to_owned(), json!(page.id));
+        entry.insert("page_id".to_owned(), json!(page.page_id));
+        for view in &skill.views {
+            match view {
+                ViewSpec::Frontmatter { instance, keys, .. } if instance == alias => {
+                    let facts: Vec<Value> = keys
+                        .iter()
+                        .filter_map(|k| {
+                            page.frontmatter
+                                .get(k)
+                                .map(|v| json!({ "key": k, "value": v }))
+                        })
+                        .collect();
+                    entry.insert("facts".to_owned(), json!(facts));
+                }
+                ViewSpec::Markdown { instance } if instance == alias => {
+                    entry.insert("markdown".to_owned(), json!(page.body));
+                }
+                _ => {}
+            }
+        }
+        out.insert(alias.clone(), Value::Object(entry));
+    }
+    Some(Value::Object(out))
 }
 
 /// Inject `data: { values: rows }` into a Vega-Lite spec, replacing any

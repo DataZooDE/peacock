@@ -20,6 +20,13 @@ pub struct StructuredContent {
     pub rows: Value,
     pub param_schema: Value,
     pub current_params: Value,
+    /// Instance-page views' typed contract, keyed by the report's instance
+    /// alias: `{ alias: { skill, id, page_id, facts, markdown, … } }`.
+    /// Populated only from what the views selected (data minimality) and
+    /// only for reports that declare `instances:` — absent otherwise, so
+    /// row-report artifacts stay byte-identical to before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instances: Option<Value>,
 }
 
 /// One render's output, shared verbatim across every surface (FR-R-1/2).
