@@ -34,17 +34,25 @@ const FLUTTER_SHIM_HTML: &str = include_str!("../assets/flutter-shim.html");
 /// JSON-RPC entrypoint for `POST /mcp`.
 pub async fn handle(
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<Value>,
 ) -> impl IntoResponse {
     let id = req.get("id").cloned().unwrap_or(Value::Null);
     let method = req.get("method").and_then(Value::as_str).unwrap_or("");
     let params = req.get("params").cloned().unwrap_or(Value::Null);
+    // The host flavor rides the Host header (as on the HTTP demo path); the
+    // brand defaults to the deployment principal's tenant. Unknown names
+    // resolve to peacock's stock look — theming never fails a request.
+    let host = headers
+        .get(axum::http::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
 
     let result = match method {
         "initialize" => Ok(initialize()),
         "tools/list" => Ok(tools_list()),
         "tools/call" => tools_call(&state, &params).await,
-        "resources/read" => resources_read(&params, state.flutter_app_url.as_deref()),
+        "resources/read" => resources_read(&state, host, &params),
         "updateModelContext" => Ok(json!({ "ok": true })),
         other => Err(Error::validation(format!("unknown method `{other}`"))),
     };
@@ -148,20 +156,24 @@ fn summary(report_id: &str, art: &Artifact) -> String {
 /// Otherwise — the default, and the only correct choice when peacock is reached
 /// only via Triton's proxy — it is the **self-contained** `iframe.html` (the
 /// host can't fetch the multi-file Flutter bundle through `resources/read`).
-pub(crate) fn resources_read(
-    params: &Value,
-    flutter_app_url: Option<&str>,
-) -> Result<Value, Error> {
+pub(crate) fn resources_read(state: &AppState, host: &str, params: &Value) -> Result<Value, Error> {
     let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
     let report_id = uri
         .strip_prefix(&format!("ui://{UI_AUTHORITY}/"))
         .ok_or_else(|| Error::validation(format!("not a peacock ui:// resource: {uri}")))?;
 
-    let html = match flutter_app_url {
+    // The resolved theme (brand = the deployment principal's tenant ⊕ the
+    // Host flavor) styles the served runtime — the same registry the HTTP
+    // demo path and the chart rasterizer use.
+    let theme = state.themes.resolve(&state.principal.tenant, host);
+
+    let html = match state.flutter_app_url.as_deref() {
         Some(base) => FLUTTER_SHIM_HTML
             .replace("__PEACOCK_APP_BASE__", base)
             .replace("__REPORT_ID__", report_id),
-        None => IFRAME_HTML.replace("__REPORT_ID__", report_id),
+        None => IFRAME_HTML
+            .replace("__REPORT_ID__", report_id)
+            .replace("__THEME_CSS__", &theme.css),
     };
     Ok(json!({
         "contents": [{ "uri": uri, "mimeType": "text/html", "text": html }]

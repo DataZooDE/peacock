@@ -42,6 +42,9 @@ pub enum ViewSpec {
         keys: Vec<String>,
         label: String,
     },
+    /// The instance page's escurel event history (processed events, oldest
+    /// first), capped at `limit`.
+    Timeline { instance: String, limit: u32 },
 }
 
 /// A parameterized instance-page reference: `[[account::{account}]]` →
@@ -308,6 +311,14 @@ fn parse_views(id: &str, fm: &Value) -> Result<Vec<ViewSpec>> {
                         .to_owned(),
                 }
             }
+            "timeline" => ViewSpec::Timeline {
+                instance: view_instance(id, v)?,
+                limit: v
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .map(|n| n.min(u32::MAX as u64) as u32)
+                    .unwrap_or(20),
+            },
             other => {
                 return Err(Error::render(format!(
                     "report `{id}`: unknown view kind `{other}`"

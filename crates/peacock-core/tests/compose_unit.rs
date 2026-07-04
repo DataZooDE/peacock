@@ -262,6 +262,7 @@ fn account_page() -> peacock_core::InstancePage {
             "status": "follow_up", "email": "maria@beverages.example",
         }),
         body: "# Beverages GmbH\n\nEU distributor.".into(),
+        events: Vec::new(),
     }
 }
 
