@@ -10,6 +10,7 @@ use serde_json::{Value, json};
 
 use crate::compose::{DEFAULT_MAX_ROWS, compose};
 use crate::data::{ReportData, RowSet};
+use crate::instance::{InstanceData, InstancePage};
 use crate::skill::ReportSkills;
 
 /// Knobs for one render.
@@ -73,7 +74,7 @@ pub async fn render<E>(
     opts: &RenderOpts,
 ) -> Result<Artifact>
 where
-    E: ReportData + ReportSkills,
+    E: ReportData + ReportSkills + InstanceData,
 {
     // 1. Resolve the report skill (escurel resolve/expand).
     let skill = escurel
@@ -106,6 +107,19 @@ where
         rows.insert(alias.clone(), rs);
     }
 
+    // 4b. Resolve each instance-page alias (`instances:`) — the record the
+    //     report renders (a customer account, a briefing). The `{param}`
+    //     placeholders substitute from the absolute vector and the resulting
+    //     id is slug-validated BEFORE any escurel read.
+    let mut pages: BTreeMap<String, InstancePage> = BTreeMap::new();
+    for (alias, iref) in &skill.instances {
+        let id = iref.resolve_id(&absolute)?;
+        let page = escurel
+            .read_instance(&iref.skill, &id, principal, opts.trace.as_ref())
+            .await?;
+        pages.insert(alias.clone(), page);
+    }
+
     // 5. Compose the one artifact (FR-R-3). `bound` (the absolute param vector
     //    as JSON) travels into compose so a Mosaic-mode view can carry the
     //    escurel-owned data-source reference (`query_ref` + bound params).
@@ -114,6 +128,7 @@ where
         &absolute,
         &bound,
         &rows,
+        &pages,
         opts.max_rows,
         opts.mosaic_threshold,
     )?;

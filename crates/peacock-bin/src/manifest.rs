@@ -17,7 +17,15 @@ pub enum RenderPolicy {
 }
 
 /// The component-catalog kinds peacock will compose (closed set).
-const ALLOWED_COMPONENTS: &[&str] = &["kpi", "vega", "table", "text", "controls"];
+const ALLOWED_COMPONENTS: &[&str] = &[
+    "kpi",
+    "vega",
+    "table",
+    "text",
+    "controls",
+    "markdown",
+    "frontmatter",
+];
 
 /// A parsed, validated manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +69,10 @@ struct RawEscurel {
 pub enum ManifestError {
     #[error("manifest parse error: {0}")]
     Parse(String),
-    #[error("manifest: unknown component `{0}` (allowed: kpi, vega, table, text, controls)")]
+    #[error(
+        "manifest: unknown component `{0}` (allowed: kpi, vega, table, text, controls, \
+         markdown, frontmatter)"
+    )]
     UnknownComponent(String),
     #[error("manifest: `render.policy` is required")]
     MissingPolicy,

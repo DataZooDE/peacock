@@ -34,6 +34,98 @@ pub enum ViewSpec {
     },
     /// A data table over the view's rows.
     Table { data: String },
+    /// An instance page's markdown body, verbatim (the renderer encodes).
+    Markdown { instance: String },
+    /// Selected frontmatter keys of an instance page as labelled facts.
+    Frontmatter {
+        instance: String,
+        keys: Vec<String>,
+        label: String,
+    },
+}
+
+/// A parameterized instance-page reference: `[[account::{account}]]` →
+/// `{ skill: "account", id_template: "{account}" }`. `{param}` placeholders
+/// substitute from the ABSOLUTE param vector at render time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstanceRef {
+    pub skill: String,
+    pub id_template: String,
+}
+
+impl InstanceRef {
+    /// Parse `[[skill::id-template]]`. The skill segment must itself be a
+    /// valid slug (it is authored, but a malformed skill page must not smuggle
+    /// a namespace).
+    fn parse(report_id: &str, alias: &str, link: &str) -> Result<Self> {
+        let inner = link.trim().trim_start_matches("[[").trim_end_matches("]]");
+        let Some((skill, id_template)) = inner.split_once("::") else {
+            return Err(Error::render(format!(
+                "report `{report_id}`: instances.{alias} must be a `[[skill::id]]` wikilink"
+            )));
+        };
+        if !is_slug(skill) {
+            return Err(Error::render(format!(
+                "report `{report_id}`: instances.{alias} names a malformed skill `{skill}`"
+            )));
+        }
+        Ok(Self {
+            skill: skill.to_owned(),
+            id_template: id_template.to_owned(),
+        })
+    }
+
+    /// Substitute `{param}` placeholders from the absolute param vector and
+    /// validate the WHOLE substituted id against a strict slug charset —
+    /// path / wikilink / namespace smuggling is rejected before any escurel
+    /// read. An undeclared placeholder is an author error (`Render`); a
+    /// non-string or smuggling VALUE is caller input (`Validation`).
+    pub fn resolve_id(
+        &self,
+        params: &std::collections::BTreeMap<String, peacock_types::ParamValue>,
+    ) -> Result<String> {
+        let mut id = String::with_capacity(self.id_template.len());
+        let mut rest = self.id_template.as_str();
+        while let Some(open) = rest.find('{') {
+            id.push_str(&rest[..open]);
+            let Some(close) = rest[open..].find('}') else {
+                return Err(Error::render(format!(
+                    "instance ref `{}`: unclosed placeholder",
+                    self.id_template
+                )));
+            };
+            let name = &rest[open + 1..open + close];
+            let value = params.get(name).ok_or_else(|| {
+                Error::render(format!(
+                    "instance ref `{}` names undeclared param `{name}`",
+                    self.id_template
+                ))
+            })?;
+            let s = value.0.as_str().ok_or_else(|| {
+                Error::validation(format!("param `{name}` must be a string instance id"))
+            })?;
+            id.push_str(s);
+            rest = &rest[open + close + 1..];
+        }
+        id.push_str(rest);
+        if !is_slug(&id) {
+            return Err(Error::validation(format!(
+                "instance id `{id}` is not a valid slug"
+            )));
+        }
+        Ok(id)
+    }
+}
+
+/// The instance-id charset: alphanumeric start, then alphanumeric plus
+/// `- _ .` — and never `..` (no traversal), max 128. Everything an escurel
+/// page slug allows, nothing a path or wikilink could smuggle.
+fn is_slug(s: &str) -> bool {
+    let ok_chars = s.len() <= 128
+        && s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    ok_chars && !s.contains("..")
 }
 
 /// KPI aggregation functions (the only client-side fold peacock does — a
@@ -55,6 +147,9 @@ pub struct ReportSkill {
     pub params: ParamSchema,
     /// Alias → escurel query ref (the structured-data-view read).
     pub data: std::collections::BTreeMap<String, String>,
+    /// Alias → parameterized instance-page ref (`instances:` frontmatter).
+    /// Disjoint from `data` aliases by construction.
+    pub instances: std::collections::BTreeMap<String, InstanceRef>,
     pub views: Vec<ViewSpec>,
     /// Named Vega-Lite specs the `vega` views reference.
     pub specs: std::collections::BTreeMap<String, Value>,
@@ -83,6 +178,23 @@ impl ReportSkill {
             }
         }
 
+        let mut instances = std::collections::BTreeMap::new();
+        if let Some(obj) = fm.get("instances").and_then(Value::as_object) {
+            for (alias, link) in obj {
+                let link = link.as_str().ok_or_else(|| {
+                    Error::render(format!(
+                        "report `{id}`: instances.{alias} must be a wikilink string"
+                    ))
+                })?;
+                if data.contains_key(alias) {
+                    return Err(Error::render(format!(
+                        "report `{id}`: alias `{alias}` is declared in both `data:` and `instances:`"
+                    )));
+                }
+                instances.insert(alias.clone(), InstanceRef::parse(id, alias, link)?);
+            }
+        }
+
         let specs = fm
             .get("specs")
             .and_then(Value::as_object)
@@ -95,6 +207,7 @@ impl ReportSkill {
             id: id.to_owned(),
             params,
             data,
+            instances,
             views,
             specs,
             narrative: body.to_owned(),
@@ -166,6 +279,35 @@ fn parse_views(id: &str, fm: &Value) -> Result<Vec<ViewSpec>> {
                     .map(str::to_owned),
             },
             "table" => ViewSpec::Table { data },
+            "markdown" => ViewSpec::Markdown {
+                instance: view_instance(id, v)?,
+            },
+            "frontmatter" => {
+                let keys: Vec<String> = v
+                    .get("keys")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if keys.is_empty() {
+                    return Err(Error::render(format!(
+                        "report `{id}`: a frontmatter view needs a non-empty `keys:` list"
+                    )));
+                }
+                ViewSpec::Frontmatter {
+                    instance: view_instance(id, v)?,
+                    keys,
+                    label: v
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Details")
+                        .to_owned(),
+                }
+            }
             other => {
                 return Err(Error::render(format!(
                     "report `{id}`: unknown view kind `{other}`"
@@ -175,6 +317,19 @@ fn parse_views(id: &str, fm: &Value) -> Result<Vec<ViewSpec>> {
         out.push(view);
     }
     Ok(out)
+}
+
+/// The `instance:` alias an instance view targets (required).
+fn view_instance(id: &str, v: &Value) -> Result<String> {
+    v.get("instance")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            Error::render(format!(
+                "report `{id}`: an instance view names no `instance:` alias"
+            ))
+        })
 }
 
 /// The report-skill resolution port (kept separate from row reads so the

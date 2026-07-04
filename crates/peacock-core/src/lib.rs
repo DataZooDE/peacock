@@ -2,6 +2,7 @@
 //! `(report skill, params, rows) → artifact` (FR-R-1).
 //!
 //! - `data` — the escurel row reader (FR-D);
+//! - `instance` — the escurel instance-page reader (records, not rows);
 //! - `skill` — the report-skill model + escurel resolution (FR-D-1);
 //! - `guardrail` — the safe Vega-Lite subset (FR-V-4);
 //! - `compose` — A2UI v0.9 + kind:vega + structuredContent (FR-R-3, FR-V);
@@ -13,6 +14,7 @@ pub mod author;
 pub mod compose;
 pub mod data;
 pub mod guardrail;
+pub mod instance;
 pub mod render;
 pub mod saved;
 pub mod skill;
@@ -21,9 +23,10 @@ pub use author::{
     AuthorError, parse_skill_markdown, scaffold, split_frontmatter, validate_skill_markdown,
 };
 pub use data::{Column, EscurelData, ReportData, RowSet};
+pub use instance::{InstanceData, InstancePage};
 pub use render::{RenderOpts, promotable_selection, render, render_a2ui_to_png, view_state_record};
 pub use saved::{BOOKMARK_SKILL, SavedRef, render_saved, resolve_saved_instance, save_instance};
-pub use skill::{Agg, ReportSkill, ReportSkills, ViewSpec};
+pub use skill::{Agg, InstanceRef, ReportSkill, ReportSkills, ViewSpec};
 
 /// A sink that captures the **real** escurel-client wire payloads a render
 /// issues (resolve + query_instance, request and response), so a surface can
