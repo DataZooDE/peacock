@@ -285,7 +285,9 @@ fn view_refs(view: &ViewSpec) -> (&str, Vec<&str>) {
             }
             (data.as_str(), specs)
         }
-        ViewSpec::Markdown { .. } | ViewSpec::Frontmatter { .. } => ("", Vec::new()),
+        ViewSpec::Markdown { .. } | ViewSpec::Frontmatter { .. } | ViewSpec::Timeline { .. } => {
+            ("", Vec::new())
+        }
     }
 }
 
@@ -294,6 +296,7 @@ fn view_instance_ref(view: &ViewSpec) -> Option<&str> {
     match view {
         ViewSpec::Markdown { instance } => Some(instance.as_str()),
         ViewSpec::Frontmatter { instance, .. } => Some(instance.as_str()),
+        ViewSpec::Timeline { instance, .. } => Some(instance.as_str()),
         _ => None,
     }
 }

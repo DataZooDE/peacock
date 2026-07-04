@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>peacock report</title>
 <style>
+  /* Local look, themed via the injected --pk-* tokens (fallbacks = stock). */
   :root { --ink:#201f1e; --soft:#605e5c; --line:#e1dfdd; --accent:#0f6cbd; --font:"Segoe UI",system-ui,sans-serif; }
   * { box-sizing: border-box; }
-  body { margin:0; font-family:var(--font); color:var(--ink); background:#fff; }
+  body { margin:0; font-family:var(--pk-font, var(--font)); color:var(--pk-ink, var(--ink)); background:#fff; }
   .wrap { padding:14px; }
   .head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
   .head .t { font-weight:600; font-size:15px; }
@@ -15,16 +16,31 @@
   .kpis { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
   .kpi { flex:1; min-width:120px; background:#f4f9fe; border:1px solid #e4eef8; border-radius:10px; padding:10px 12px; }
   .kpi .l { font-size:11px; color:var(--soft); text-transform:uppercase; letter-spacing:.4px; }
-  .kpi .v { font-size:22px; font-weight:700; color:var(--accent); }
+  .kpi .v { font-size:22px; font-weight:700; color:var(--pk-accent, var(--accent)); }
   img { width:100%; height:auto; border-radius:8px; display:block; }
   .chips { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
   .chip { font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line); background:#fff; }
-  .chip.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .chip.on { background:var(--pk-accent, var(--accent)); color:#fff; border-color:var(--pk-accent, var(--accent)); }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th,td { text-align:left; padding:6px 9px; border-bottom:1px solid var(--line); }
   td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
   .muted { color:var(--soft); font-size:12px; }
+  /* Instance-report components (facts / markdown / timeline). */
+  .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin-bottom:12px; }
+  .fact { background:#f7f6f5; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .fact .k { font-size:11px; color:var(--soft); text-transform:uppercase; letter-spacing:.4px; }
+  .fact .w { font-size:14px; font-weight:600; overflow-wrap:anywhere; }
+  .md { font-size:13.5px; line-height:1.55; margin-bottom:12px; }
+  .md h3 { margin:.6em 0 .3em; font-size:15px; }
+  .md ul { margin:.3em 0 .6em 1.2em; padding:0; }
+  .md .link { color:var(--pk-accent, var(--accent)); font-weight:600; }
+  .tl { border-left:2px solid var(--pk-accent, var(--accent)); margin:4px 0 12px 6px; padding-left:12px; }
+  .tl .ev { margin-bottom:10px; }
+  .tl .ev .tt { font-weight:600; font-size:13px; }
+  .tl .ev .meta { font-size:11px; color:var(--soft); }
+  .tl .ev .bd { font-size:12.5px; white-space:pre-wrap; overflow-wrap:anywhere; }
 </style>
+<style id="pk-theme">__THEME_CSS__</style>
 </head>
 <body>
   <div class="wrap" id="app"><div class="muted">Loading report…</div></div>
@@ -35,7 +51,37 @@
 // standalone (no MCP host), so the resource is independently verifiable.
 const REPORT_ID = "__REPORT_ID__";
 const money = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
-let params = { from: "1997-01-01", to: "1997-12-31", category: "ALL" };
+// EVERY dynamic string is escaped before it touches innerHTML — instance
+// bodies, facts and event titles are agent-/user-authored content.
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const titleize = k => esc(k).replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+let params = {};
+
+// Markdown, escape-then-format: the WHOLE line is escaped first, then a few
+// line-level transforms build structure. No raw HTML ever passes through.
+function mdToHtml(md) {
+  const out = [];
+  let list = false, para = [];
+  const flushPara = () => { if (para.length) { out.push(`<p>${para.join(" ")}</p>`); para = []; } };
+  const flushList = () => { if (list) { out.push("</ul>"); list = false; } };
+  for (const raw of String(md ?? "").split("\n")) {
+    const line = esc(raw.trim()).replace(/\[\[([^\]]+)\]\]/g, '<span class="link">$1</span>');
+    if (!line) { flushPara(); flushList(); continue; }
+    if (line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ")) {
+      flushPara(); flushList();
+      out.push(`<h3>${line.replace(/^#+\s*/, "")}</h3>`);
+    } else if (line.startsWith("- ")) {
+      flushPara();
+      if (!list) { out.push("<ul>"); list = true; }
+      out.push(`<li>${line.slice(2)}</li>`);
+    } else {
+      flushList(); para.push(line);
+    }
+  }
+  flushPara(); flushList();
+  return out.join("");
+}
 
 // MCP-Apps host bridge (postMessage). When embedded, the host fulfils these.
 function callServerTool(name, args) {
@@ -62,28 +108,60 @@ function updateModelContext(record) {
     window.parent.postMessage({ type:"mcp:updateModelContext", record }, "*");
 }
 
+// One instance alias → facts grid + markdown + timeline (whatever the report
+// composed for it). All content escaped (agent-/user-authored).
+function instanceHtml(alias, inst) {
+  const facts = (inst.facts || []).map(f =>
+    `<div class="fact"><div class="k">${titleize(f.key)}</div><div class="w">${esc(
+      typeof f.value === "string" ? f.value : JSON.stringify(f.value))}</div></div>`).join("");
+  const events = inst.events === undefined ? "" : (inst.events.length
+    ? `<div class="tl">${inst.events.map(e =>
+        `<div class="ev"><div class="tt">${esc(e.title)}</div>
+         <div class="meta">${esc(e.label)}${e.at ? " · " + esc(e.at) : ""} · ${esc(e.source)}</div>
+         <div class="bd">${esc(e.body)}</div></div>`).join("")}</div>`
+    : `<div class="muted">No activity yet.</div>`);
+  return `
+    <div class="head"><div><div class="t">${titleize(inst.id || alias)}</div>
+      <div class="sub">${esc(inst.skill || "")} · live from escurel</div></div></div>
+    ${facts ? `<div class="facts">${facts}</div>` : ""}
+    ${inst.markdown ? `<div class="md">${mdToHtml(inst.markdown)}</div>` : ""}
+    ${events}`;
+}
+
 function render(data) {
-  const sc = data.structuredContent || data;
-  const rows = (sc.rows) || [];
+  const sc = (data && data.structuredContent) || data || {};
+  const rows = sc.rows || [];
   params = sc.current_params || params;
-  const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
-  const cats = [...new Set(rows.map(r=>r.category))];
-  const png = (data._meta && data._meta.png_base64) || data.png_base64;
-  const scope = params.category && params.category!=="ALL" ? params.category : "All categories";
-  const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
+  const png = (data && data._meta && data._meta.png_base64) || sc.png_base64;
 
-  document.getElementById("app").innerHTML = `
-    <div class="head"><div><div class="t">Northwind revenue by category</div>
-      <div class="sub">${scope} · live from escurel</div></div></div>
-    <div class="kpis">
-      <div class="kpi"><div class="l">Total revenue</div><div class="v">${money(total)}</div></div>
-      <div class="kpi"><div class="l">Categories</div><div class="v" style="color:#201f1e">${cats.length}</div></div>
-    </div>
-    ${png ? `<img alt="chart" src="data:image/png;base64,${png}">` : ""}
-    <div class="chips">${allCats.map(c=>`<span class="chip ${(params.category||'ALL')===c?'on':''}" data-cat="${c}">${c==='ALL'?'All':c}</span>`).join("")}</div>
-    <table><tr><th>Month</th><th>Category</th><th class="num">Revenue</th></tr>
-      ${rows.map(r=>`<tr><td>${r.month}</td><td>${r.category}</td><td class="num">${money(r.revenue)}</td></tr>`).join("")}</table>`;
+  const parts = [];
 
+  // Instance report: the record(s) the report composed (facts/markdown/timeline).
+  for (const [alias, inst] of Object.entries(sc.instances || {}))
+    parts.push(instanceHtml(alias, inst));
+
+  // Row report: KPI + chart + drill chips + table (the Northwind demo shape).
+  if (rows.length) {
+    const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
+    const cats = [...new Set(rows.map(r=>r.category))];
+    const scope = params.category && params.category!=="ALL" ? params.category : "All categories";
+    const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
+    parts.push(`
+      <div class="head"><div><div class="t">Northwind revenue by category</div>
+        <div class="sub">${esc(scope)} · live from escurel</div></div></div>
+      <div class="kpis">
+        <div class="kpi"><div class="l">Total revenue</div><div class="v">${money(total)}</div></div>
+        <div class="kpi"><div class="l">Categories</div><div class="v" style="color:#201f1e">${cats.length}</div></div>
+      </div>
+      ${png ? `<img alt="chart" src="data:image/png;base64,${png}">` : ""}
+      <div class="chips">${allCats.map(c=>`<span class="chip ${(params.category||'ALL')===c?'on':''}" data-cat="${esc(c)}">${esc(c==='ALL'?'All':c)}</span>`).join("")}</div>
+      <table><tr><th>Month</th><th>Category</th><th class="num">Revenue</th></tr>
+        ${rows.map(r=>`<tr><td>${esc(r.month)}</td><td>${esc(r.category)}</td><td class="num">${money(r.revenue)}</td></tr>`).join("")}</table>`);
+  } else if (!parts.length) {
+    parts.push(`<div class="muted">Nothing to show.</div>`);
+  }
+
+  document.getElementById("app").innerHTML = parts.join("");
   document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => drill(ch.dataset.cat));
 }
 
@@ -99,7 +177,7 @@ async function drill(cat) {
 }
 
 callServerTool("render_report", { report_id: REPORT_ID, params }).then(render)
-  .catch(e => document.getElementById("app").innerHTML = `<div class="muted">Couldn't load: ${e}</div>`);
+  .catch(e => document.getElementById("app").innerHTML = `<div class="muted">Couldn't load: ${esc(e)}</div>`);
 </script>
 </body>
 </html>

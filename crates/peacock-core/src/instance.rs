@@ -7,7 +7,7 @@
 //! bookmark-read precedent, generalized. No SQL, no credential.
 
 use async_trait::async_trait;
-use escurel_client::{Client, ExpandRequest, ResolveRequest};
+use escurel_client::{Client, ExpandRequest, ListEventsRequest, ResolveRequest};
 use peacock_types::{Error, Principal, Result};
 use secrecy::SecretString;
 use serde_json::{Value, json};
@@ -16,13 +16,26 @@ use crate::TraceSink;
 use crate::data::map_err;
 
 /// One resolved instance page: identity + the frontmatter/body the views
-/// select from.
+/// select from, plus the event history when a `timeline` view asked for it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstancePage {
     pub page_id: String,
     pub skill: String,
     pub id: String,
     pub frontmatter: Value,
+    pub body: String,
+    /// Processed events, oldest first (escurel's folded history) — populated
+    /// only for aliases a `timeline` view references, empty otherwise.
+    pub events: Vec<InstanceEvent>,
+}
+
+/// One event from an instance's history — the fields a timeline shows.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InstanceEvent {
+    pub at: String,
+    pub source: String,
+    pub label: String,
+    pub title: String,
     pub body: String,
 }
 
@@ -39,6 +52,17 @@ pub trait InstanceData: Send + Sync {
         principal: &Principal,
         trace: Option<&TraceSink>,
     ) -> Result<InstancePage>;
+
+    /// The page's PROCESSED events, oldest first, capped at `limit`
+    /// (escurel `list_events` — an inbox event that was never assigned is a
+    /// pending work item, not history, and does not appear).
+    async fn instance_events(
+        &self,
+        instance_page_id: &str,
+        limit: u32,
+        principal: &Principal,
+        trace: Option<&TraceSink>,
+    ) -> Result<Vec<InstanceEvent>>;
 }
 
 #[async_trait]
@@ -98,6 +122,49 @@ impl InstanceData for crate::data::EscurelData {
             id: id.to_owned(),
             frontmatter: expanded.frontmatter,
             body: expanded.body,
+            events: Vec::new(),
         })
+    }
+
+    async fn instance_events(
+        &self,
+        instance_page_id: &str,
+        limit: u32,
+        principal: &Principal,
+        trace: Option<&TraceSink>,
+    ) -> Result<Vec<InstanceEvent>> {
+        let token = SecretString::from(principal.raw_token.clone());
+        let client = Client::connect(self.endpoint(), token)
+            .await
+            .map_err(map_err)?;
+        let resp = client
+            .list_events(ListEventsRequest {
+                instance_page_id: instance_page_id.to_owned(),
+                limit,
+            })
+            .await
+            .map_err(map_err)?;
+
+        crate::record(
+            trace,
+            json!({
+                "hop": "peacock→escurel",
+                "method": "list_events",
+                "request": { "instance_page_id": instance_page_id, "limit": limit },
+                "response": { "event_count": resp.events.len() },
+            }),
+        );
+
+        Ok(resp
+            .events
+            .into_iter()
+            .map(|e| InstanceEvent {
+                at: e.at,
+                source: e.source,
+                label: e.label_skill,
+                title: e.title,
+                body: e.body,
+            })
+            .collect())
     }
 }

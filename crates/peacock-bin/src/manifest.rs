@@ -25,6 +25,7 @@ const ALLOWED_COMPONENTS: &[&str] = &[
     "controls",
     "markdown",
     "frontmatter",
+    "timeline",
 ];
 
 /// A parsed, validated manifest.
@@ -71,7 +72,7 @@ pub enum ManifestError {
     Parse(String),
     #[error(
         "manifest: unknown component `{0}` (allowed: kpi, vega, table, text, controls, \
-         markdown, frontmatter)"
+         markdown, frontmatter, timeline)"
     )]
     UnknownComponent(String),
     #[error("manifest: `render.policy` is required")]

@@ -59,8 +59,14 @@ pub async fn handle(
         return tool_call(&state, tool, body).await;
     }
     if let Some(op) = headers.get("x-triton-mcp").and_then(|v| v.to_str().ok()) {
+        // The proxied host flavor rides the Host header (Triton forwards it);
+        // unknown flavors resolve to the stock look.
+        let host = headers
+            .get(axum::http::header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
         return match op {
-            "resources/read" => match resources_read(&body, state.flutter_app_url.as_deref()) {
+            "resources/read" => match resources_read(&state, host, &body) {
                 Ok(r) => Json(r).into_response(),
                 Err(e) => {
                     (StatusCode::NOT_FOUND, Json(json!({ "error": e.kind() }))).into_response()

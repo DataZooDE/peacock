@@ -114,9 +114,26 @@ where
     let mut pages: BTreeMap<String, InstancePage> = BTreeMap::new();
     for (alias, iref) in &skill.instances {
         let id = iref.resolve_id(&absolute)?;
-        let page = escurel
+        let mut page = escurel
             .read_instance(&iref.skill, &id, principal, opts.trace.as_ref())
             .await?;
+        // Fetch the event history only when a timeline view shows it (the
+        // largest limit wins if several timelines share the alias).
+        let timeline_limit = skill
+            .views
+            .iter()
+            .filter_map(|v| match v {
+                crate::skill::ViewSpec::Timeline { instance, limit } if instance == alias => {
+                    Some(*limit)
+                }
+                _ => None,
+            })
+            .max();
+        if let Some(limit) = timeline_limit {
+            page.events = escurel
+                .instance_events(&page.page_id, limit, principal, opts.trace.as_ref())
+                .await?;
+        }
         pages.insert(alias.clone(), page);
     }
 

@@ -158,6 +158,18 @@ pub fn compose(
                     "facts": facts,
                 }));
             }
+            ViewSpec::Timeline { instance, limit } => {
+                let page = instance_page(pages, instance)?;
+                // Empty history still emits (`events: []`) — the layout is
+                // deterministic, never data-dependent (ADR-P7).
+                let events: Vec<Value> = page
+                    .events
+                    .iter()
+                    .take(*limit as usize)
+                    .map(event_json)
+                    .collect();
+                components.push(json!({ "kind": "timeline", "events": events }));
+            }
         }
     }
 
@@ -259,12 +271,33 @@ fn instances_content(skill: &ReportSkill, pages: &BTreeMap<String, InstancePage>
                 ViewSpec::Markdown { instance } if instance == alias => {
                     entry.insert("markdown".to_owned(), json!(page.body));
                 }
+                ViewSpec::Timeline { instance, limit } if instance == alias => {
+                    let events: Vec<Value> = page
+                        .events
+                        .iter()
+                        .take(*limit as usize)
+                        .map(event_json)
+                        .collect();
+                    entry.insert("events".to_owned(), json!(events));
+                }
                 _ => {}
             }
         }
         out.insert(alias.clone(), Value::Object(entry));
     }
     Some(Value::Object(out))
+}
+
+/// One timeline event's JSON shape (shared by the component and the typed
+/// structuredContent contract).
+fn event_json(e: &crate::instance::InstanceEvent) -> Value {
+    json!({
+        "at": e.at,
+        "source": e.source,
+        "label": e.label,
+        "title": e.title,
+        "body": e.body,
+    })
 }
 
 /// Inject `data: { values: rows }` into a Vega-Lite spec, replacing any
