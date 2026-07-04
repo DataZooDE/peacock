@@ -399,3 +399,224 @@ async fn the_iframe_surfaces_render_errors_and_derives_drill_chips() {
     );
     nw.shutdown().await;
 }
+
+// ── The `document` pseudo-report + skill-page actions (Sources targets) ──
+
+/// An account skill with document affordances: a prompt action and an
+/// event action (`actions:` frontmatter — the skill page is the contract).
+const ACTIONS_ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+    description: A customer account.\nrequired_frontmatter: [id, name]\n\
+    optional_frontmatter: [status]\n\
+    actions:\n\
+    \x20 - name: propose-nba\n\
+    \x20   kind: prompt\n\
+    \x20   label: Propose next best action\n\
+    \x20   prompt: \"whats the next best action for {id}?\"\n\
+    \x20 - name: renewal-at-risk\n\
+    \x20   kind: event\n\
+    \x20   label: Flag renewal at risk\n\
+    \x20   event: follow_up\n\
+    \x20   title: \"{frontmatter.name}\"\n\
+    \x20   body: \"renewal at risk (flagged from the document)\"\n\
+    ---\n# account\n";
+
+const PLAIN_ACCOUNT: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+    name: Beverages GmbH\nstatus: follow_up\n---\n# Beverages GmbH\n\n\
+    See [[email::mail-1]] for the renewal thread.\n";
+
+async fn start_with_actions() -> (NorthwindEscurel, String) {
+    let nw = NorthwindEscurel::spawn_with(peacock_test_support::NorthwindOpts {
+        extra_skills: vec![("account".to_owned(), ACTIONS_ACCOUNT_SKILL.to_owned())],
+        extra_instances: vec![(
+            "account".to_owned(),
+            "beverages-gmbh".to_owned(),
+            PLAIN_ACCOUNT.to_owned(),
+        )],
+        ..Default::default()
+    })
+    .await;
+    let state = Arc::new(AppState {
+        escurel: EscurelData::new(nw.endpoint()),
+        principal: nw.sales_principal(),
+        png_scale: 2.0,
+        demo_html: "<!doctype html>",
+        flutter_dir: None,
+        flutter_app_url: None,
+        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    tokio::spawn(async move { serve(addr, state).await.unwrap() });
+    for _ in 0..50 {
+        if reqwest::get(format!("http://{addr}/healthz")).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    (nw, format!("http://{addr}"))
+}
+
+#[tokio::test]
+async fn tools_list_advertises_emit_document_event() {
+    let (nw, base) = start().await;
+    let tools = rpc(&base, "tools/list", json!({})).await;
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"emit_document_event"), "{names:?}");
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn document_render_carries_the_action_contract_and_the_uri_round_trips() {
+    let (nw, base) = start_with_actions().await;
+
+    // tools/call the pseudo-report: the document contract rides the result.
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "render_report", "arguments": {
+            "report_id": "document",
+            "params": { "skill": "account", "id": "beverages-gmbh" },
+        }}),
+    )
+    .await;
+    let res = &r["result"];
+    assert_eq!(res["isError"], false, "{r}");
+    let doc = &res["structuredContent"]["document"];
+    assert_eq!(doc["skill"], "account");
+    assert_eq!(doc["id"], "beverages-gmbh");
+    assert_eq!(doc["actions"][0]["kind"], "prompt");
+    assert_eq!(
+        doc["actions"][0]["prompt"],
+        "whats the next best action for beverages-gmbh?"
+    );
+    // Event actions never ship their captured title/body.
+    assert_eq!(doc["actions"][1]["kind"], "event");
+    assert!(doc["actions"][1].get("title").is_none());
+    // The caller params ride the minted URI (FR-M-2 + the params contract).
+    assert_eq!(
+        res["_meta"]["ui"]["resourceUri"],
+        "ui://peacock/document?skill=account&id=beverages-gmbh"
+    );
+
+    // …and resources/read of that URI seeds the runtime: params island +
+    // the action/wikilink/prompt machinery in the served HTML.
+    let read = rpc(
+        &base,
+        "resources/read",
+        json!({ "uri": "ui://peacock/document?skill=account&id=beverages-gmbh" }),
+    )
+    .await;
+    let html = read["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(html.contains("\"skill\":\"account\"") && html.contains("\"id\":\"beverages-gmbh\""));
+    assert!(html.contains("mcp:prompt"), "the prompt verb is wired");
+    assert!(
+        html.contains("emit_document_event"),
+        "the event tool is wired"
+    );
+    assert!(html.contains("data-skill"), "wikilinks are navigable");
+
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn emit_document_event_captures_as_the_caller() {
+    let (nw, base) = start_with_actions().await;
+
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "emit_document_event", "arguments": {
+            "skill": "account", "id": "beverages-gmbh", "action": "renewal-at-risk",
+        }}),
+    )
+    .await;
+    assert_eq!(r["result"]["ok"], true, "{r}");
+    let event_id = r["result"]["event_id"].as_str().unwrap();
+    assert!(!event_id.is_empty());
+
+    // The event landed in escurel with the SERVER-substituted templates.
+    let client = nw.sales_client().await;
+    let inbox = client
+        .list_inbox(escurel_client::ListInboxRequest { limit: 50 })
+        .await
+        .expect("list inbox");
+    let ev = inbox
+        .events
+        .iter()
+        .find(|e| e.event_id == event_id)
+        .expect("the captured event is in the inbox");
+    assert_eq!(ev.label_skill, "follow_up");
+    assert_eq!(
+        ev.title, "Beverages GmbH",
+        "{{frontmatter.name}} substituted"
+    );
+    assert_eq!(ev.source, "peacock");
+
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn emit_document_event_fails_closed() {
+    let (nw, base) = start_with_actions().await;
+
+    // A prompt action is NOT emittable.
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "emit_document_event", "arguments": {
+            "skill": "account", "id": "beverages-gmbh", "action": "propose-nba",
+        }}),
+    )
+    .await;
+    assert!(
+        r["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("propose-nba"),
+        "{r}"
+    );
+
+    // An undeclared action name.
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "emit_document_event", "arguments": {
+            "skill": "account", "id": "beverages-gmbh", "action": "made-up",
+        }}),
+    )
+    .await;
+    assert!(r.get("error").is_some(), "{r}");
+
+    // Smuggled identifiers are rejected before any escurel read.
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "emit_document_event", "arguments": {
+            "skill": "../etc", "id": "beverages-gmbh", "action": "renewal-at-risk",
+        }}),
+    )
+    .await;
+    assert!(r.get("error").is_some(), "{r}");
+
+    // Nothing was captured by any of the refusals.
+    let client = nw.sales_client().await;
+    let inbox = client
+        .list_inbox(escurel_client::ListInboxRequest { limit: 50 })
+        .await
+        .expect("list inbox");
+    assert!(
+        inbox.events.iter().all(|e| e.source != "peacock"),
+        "no peacock event captured: {:?}",
+        inbox.events
+    );
+
+    nw.shutdown().await;
+}

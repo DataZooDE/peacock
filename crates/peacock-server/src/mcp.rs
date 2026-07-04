@@ -87,6 +87,21 @@ fn tools_list() -> Value {
             },
             "required": ["report_id"]
         }
+    }, {
+        "name": "emit_document_event",
+        "description": "Execute an `event` action a document's escurel SKILL \
+                        page declares (`actions:` frontmatter): the event is \
+                        validated against the skill page server-side and \
+                        captured in escurel as the caller.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "skill": { "type": "string" },
+                "id": { "type": "string" },
+                "action": { "type": "string" }
+            },
+            "required": ["skill", "id", "action"]
+        }
     }] })
 }
 
@@ -95,10 +110,13 @@ fn tools_list() -> Value {
 /// with new absolute params (FR-M-3).
 async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Value, Error> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+    let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    if name == "emit_document_event" {
+        return emit_document_event(state, &args).await;
+    }
     if name != "render_report" {
         return Err(Error::validation(format!("unknown tool `{name}`")));
     }
-    let args = params.get("arguments").cloned().unwrap_or(json!({}));
     let report_id = args
         .get("report_id")
         .and_then(Value::as_str)
@@ -124,6 +142,30 @@ async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Valu
     .await?;
 
     Ok(tool_result(report_id, &report_params, &art))
+}
+
+/// `tools/call emit_document_event` → validate the named action against the
+/// document's SKILL page and capture its event in escurel as the caller
+/// (peacock's only write path; the forwarded bearer keeps escurel's ACL in
+/// charge). The core owns the whole validation chain.
+pub(crate) async fn emit_document_event(state: &AppState, args: &Value) -> Result<Value, Error> {
+    let field = |k: &str| {
+        args.get(k)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| Error::validation(format!("arguments.{k} is required")))
+    };
+    let (skill, id, action) = (field("skill")?, field("id")?, field("action")?);
+    let event_id = peacock_core::emit_document_event(
+        skill,
+        id,
+        action,
+        &state.principal,
+        &state.escurel,
+        None,
+    )
+    .await?;
+    Ok(json!({ "ok": true, "event_id": event_id }))
 }
 
 /// Build the MCP `tools/call` result: `structuredContent` + a text summary +
@@ -258,6 +300,10 @@ pub(crate) fn resources_read(state: &AppState, host: &str, params: &Value) -> Re
     // URI by [`tool_result`] seed the runtime's FIRST render (a
     // param-required report is unrenderable from a bare URI).
     let (report_id, query) = rest.split_once('?').unwrap_or((rest, ""));
+    // Report ids are slugs; anything else never reaches the template splice.
+    if !peacock_core::is_slug(report_id) {
+        return Err(Error::validation(format!("not a report id: `{report_id}`")));
+    }
     let initial = query_params(query);
     // Serialized as a JSON literal into a <script type="application/json">
     // island; `<` escaped so hostile param VALUES can never close the tag.

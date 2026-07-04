@@ -63,6 +63,11 @@ impl Default for RenderOpts {
     }
 }
 
+/// The reserved pseudo-report id: `render("document", {skill, id})` renders
+/// ONE escurel instance page as a document — the chat-reply "Sources"
+/// target. It shadows any authored report skill of the same name.
+pub const DOCUMENT_REPORT_ID: &str = "document";
+
 /// Render `(report_id, params)` for `principal` against an escurel binding.
 /// `escurel` supplies both the report-skill resolution and the row reads, so
 /// the embedded face and the service share this exact path (FR-R-1, FR-E-1).
@@ -76,6 +81,12 @@ pub async fn render<E>(
 where
     E: ReportData + ReportSkills + InstanceData,
 {
+    // 0. The reserved `document` pseudo-report intercepts BEFORE any
+    //    authored-skill resolution (an imposter page never shadows it).
+    if report_id == DOCUMENT_REPORT_ID {
+        return render_document(params, principal, escurel, opts).await;
+    }
+
     // 1. Resolve the report skill (escurel resolve/expand).
     let skill = escurel
         .resolve_report(report_id, principal, opts.trace.as_ref())
@@ -155,25 +166,312 @@ where
     //    chart when the report has one, else the INSTANCE CARD (title +
     //    facts + body + activity) for a chartless instance report — every
     //    surface Triton fronts gets a usable image.
-    if let Some(scale) = opts.png_scale {
-        if let Some(spec) = artifact.vega_specs.first() {
-            let png = match &opts.theme {
-                Some(theme) => peacock_rasterizer::render_vega_to_png_themed(spec, scale, theme)?,
-                None => peacock_rasterizer::render_vega_to_png(spec, scale)?,
-            };
-            artifact.png = Some(png);
-        } else if let Some(req) = instance_card_request(&skill, &pages) {
-            let png = match &opts.theme {
-                Some(theme) => {
-                    peacock_rasterizer::render_instance_card_to_png_themed(&req, scale, theme)?
-                }
-                None => peacock_rasterizer::render_instance_card_to_png(&req, scale)?,
-            };
-            artifact.png = Some(png);
+    attach_png(&mut artifact, &skill, &pages, opts)?;
+
+    Ok(artifact)
+}
+
+/// Rasterize the artifact's preview PNG in place: the first chart when the
+/// report has one, else the instance card for a chartless instance report.
+/// No-op when the surface didn't ask for rasterization.
+fn attach_png(
+    artifact: &mut Artifact,
+    skill: &crate::skill::ReportSkill,
+    pages: &BTreeMap<String, InstancePage>,
+    opts: &RenderOpts,
+) -> Result<()> {
+    let Some(scale) = opts.png_scale else {
+        return Ok(());
+    };
+    if let Some(spec) = artifact.vega_specs.first() {
+        let png = match &opts.theme {
+            Some(theme) => peacock_rasterizer::render_vega_to_png_themed(spec, scale, theme)?,
+            None => peacock_rasterizer::render_vega_to_png(spec, scale)?,
+        };
+        artifact.png = Some(png);
+    } else if let Some(req) = instance_card_request(skill, pages) {
+        let png = match &opts.theme {
+            Some(theme) => {
+                peacock_rasterizer::render_instance_card_to_png_themed(&req, scale, theme)?
+            }
+            None => peacock_rasterizer::render_instance_card_to_png(&req, scale)?,
+        };
+        artifact.png = Some(png);
+    }
+    Ok(())
+}
+
+/// The `document` pseudo-report: render one instance page (`{skill, id}`)
+/// as a document. The target's SKILL page is the contract — its optional
+/// `viewer:` delegates to a richer authored report; its `actions:` list
+/// becomes the document's affordances (`structuredContent.document`).
+async fn render_document<E>(
+    params: &Value,
+    principal: &Principal,
+    escurel: &E,
+    opts: &RenderOpts,
+) -> Result<Artifact>
+where
+    E: ReportData + ReportSkills + InstanceData,
+{
+    use crate::skill::{ViewSpec, is_slug};
+
+    // Caller input: both params are required slugs — path / wikilink /
+    // namespace smuggling is rejected before ANY escurel read.
+    let doc_skill = params
+        .get("skill")
+        .and_then(Value::as_str)
+        .filter(|s| is_slug(s))
+        .ok_or_else(|| {
+            peacock_types::Error::validation("document: `skill` must be a slug param")
+        })?;
+    let doc_id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| is_slug(s))
+        .ok_or_else(|| peacock_types::Error::validation("document: `id` must be a slug param"))?;
+
+    // The target's SKILL page: viewer + actions. A plain skill page parses
+    // to an empty ReportSkill carrying just those declarations.
+    let skill_page = escurel
+        .resolve_report(doc_skill, principal, opts.trace.as_ref())
+        .await?;
+
+    // Read the instance ONCE up front — existence + ACL gate every path,
+    // and the action templates substitute against its frontmatter.
+    let mut page = escurel
+        .read_instance(doc_skill, doc_id, principal, opts.trace.as_ref())
+        .await?;
+    let actions = resolve_actions(&skill_page.actions, &page)?;
+    let document = json!({ "skill": doc_skill, "id": doc_id, "actions": actions });
+
+    // Delegation: the skill page names the report that best renders one of
+    // its instances. The pseudo-report id itself is rejected at parse time,
+    // so this recursion is one level deep by construction.
+    if let Some(viewer) = &skill_page.viewer {
+        let viewer_params = json!({ viewer.param.clone(): doc_id });
+        let mut artifact = Box::pin(render(
+            &viewer.report,
+            &viewer_params,
+            principal,
+            escurel,
+            opts,
+        ))
+        .await?;
+        artifact.structured_content.document = Some(document);
+        return Ok(artifact);
+    }
+
+    // Generic fallback: facts (the page's own frontmatter, structural keys
+    // excluded) + markdown body + event timeline.
+    let fact_keys: Vec<String> = page
+        .frontmatter
+        .as_object()
+        .map(|o| {
+            o.keys()
+                .filter(|k| !matches!(k.as_str(), "type" | "skill" | "id"))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut views = Vec::new();
+    if !fact_keys.is_empty() {
+        views.push(ViewSpec::Frontmatter {
+            instance: "doc".to_owned(),
+            keys: fact_keys,
+            label: doc_skill.to_owned(),
+        });
+    }
+    views.push(ViewSpec::Markdown {
+        instance: "doc".to_owned(),
+    });
+    views.push(ViewSpec::Timeline {
+        instance: "doc".to_owned(),
+        limit: 20,
+    });
+    page.events = escurel
+        .instance_events(&page.page_id, 20, principal, opts.trace.as_ref())
+        .await?;
+
+    let mut instances = BTreeMap::new();
+    instances.insert(
+        "doc".to_owned(),
+        crate::skill::InstanceRef {
+            skill: doc_skill.to_owned(),
+            id_template: doc_id.to_owned(),
+        },
+    );
+    let synthesized = crate::skill::ReportSkill {
+        id: DOCUMENT_REPORT_ID.to_owned(),
+        params: doc_param_schema(),
+        data: BTreeMap::new(),
+        instances,
+        views,
+        specs: BTreeMap::new(),
+        narrative: String::new(),
+        viewer: None,
+        actions: Vec::new(),
+    };
+
+    let absolute: BTreeMap<String, peacock_types::ParamValue> = [
+        ("skill".to_owned(), Value::from(doc_skill).into()),
+        ("id".to_owned(), Value::from(doc_id).into()),
+    ]
+    .into();
+    let bound = json!({ "skill": doc_skill, "id": doc_id });
+    let mut pages = BTreeMap::new();
+    pages.insert("doc".to_owned(), page);
+
+    let mut artifact = compose(
+        &synthesized,
+        &absolute,
+        &bound,
+        &BTreeMap::new(),
+        &pages,
+        opts.max_rows,
+        opts.mosaic_threshold,
+    )?;
+    attach_png(&mut artifact, &synthesized, &pages, opts)?;
+    artifact.structured_content.document = Some(document);
+    Ok(artifact)
+}
+
+/// Execute a document's `event` action: validate the caller-named action
+/// against the target's SKILL page (server-side — the client only ever sends
+/// the action `name` back), substitute the event templates against the
+/// instance, and capture the event as the CALLER (forwarded bearer, escurel
+/// ACL gates the write). Returns the minted event id. A `prompt` action or
+/// an undeclared name is a validation error — nothing is captured.
+pub async fn emit_document_event<E>(
+    doc_skill: &str,
+    doc_id: &str,
+    action_name: &str,
+    principal: &Principal,
+    escurel: &E,
+    trace: Option<&crate::TraceSink>,
+) -> Result<String>
+where
+    E: ReportSkills + InstanceData,
+{
+    use crate::skill::{ActionKind, is_slug};
+
+    for (label, v) in [
+        ("skill", doc_skill),
+        ("id", doc_id),
+        ("action", action_name),
+    ] {
+        if !is_slug(v) {
+            return Err(peacock_types::Error::validation(format!(
+                "emit_document_event: `{label}` must be a slug"
+            )));
         }
     }
 
-    Ok(artifact)
+    let skill_page = escurel.resolve_report(doc_skill, principal, trace).await?;
+    let spec = skill_page
+        .actions
+        .iter()
+        .find(|a| a.name == action_name && a.kind == ActionKind::Event)
+        .ok_or_else(|| {
+            peacock_types::Error::validation(format!(
+                "`{action_name}` is not an event action the `{doc_skill}` skill page declares"
+            ))
+        })?;
+    let event = spec
+        .event
+        .as_ref()
+        .expect("event actions carry an EventSpec by construction");
+
+    // Existence + ACL gate: the instance is read as the caller before any
+    // write; the templates substitute against what the caller may see.
+    let page = escurel
+        .read_instance(doc_skill, doc_id, principal, trace)
+        .await?;
+    let title = substitute_template(&event.title, &page)?;
+    let body = substitute_template(&event.body, &page)?;
+
+    escurel
+        .capture_document_event(
+            &event.label_skill,
+            &page.page_id,
+            &title,
+            &body,
+            principal,
+            trace,
+        )
+        .await
+}
+
+/// The pseudo-report's param schema: two required strings.
+fn doc_param_schema() -> peacock_types::ParamSchema {
+    serde_json::from_value(json!({
+        "skill": { "type": "string" },
+        "id": { "type": "string" }
+    }))
+    .expect("static schema parses")
+}
+
+/// Substitute the skill page's action templates against the target
+/// instance: `{id}` and `{frontmatter.<key>}` (string values only — a
+/// missing or non-string key is an AUTHOR error naming the skill page).
+/// Event actions ship only `{name, kind, label}` — their captured
+/// title/body stay server-side.
+fn resolve_actions(specs: &[crate::skill::ActionSpec], page: &InstancePage) -> Result<Vec<Value>> {
+    use crate::skill::ActionKind;
+    specs
+        .iter()
+        .map(|a| {
+            Ok(match a.kind {
+                ActionKind::Prompt => {
+                    let prompt =
+                        substitute_template(a.prompt.as_deref().unwrap_or_default(), page)?;
+                    json!({ "name": a.name, "kind": "prompt", "label": a.label, "prompt": prompt })
+                }
+                ActionKind::Event => {
+                    json!({ "name": a.name, "kind": "event", "label": a.label })
+                }
+            })
+        })
+        .collect()
+}
+
+/// `{id}` → the instance id; `{frontmatter.<key>}` → the page's string
+/// frontmatter value. Anything else brace-shaped is an author error.
+pub(crate) fn substitute_template(template: &str, page: &InstancePage) -> Result<String> {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let Some(close) = rest[open..].find('}') else {
+            return Err(peacock_types::Error::render(format!(
+                "action template `{template}`: unclosed placeholder"
+            )));
+        };
+        let name = &rest[open + 1..open + close];
+        if name == "id" {
+            out.push_str(&page.id);
+        } else if let Some(key) = name.strip_prefix("frontmatter.") {
+            let value = page
+                .frontmatter
+                .get(key)
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    peacock_types::Error::render(format!(
+                        "action template names `frontmatter.{key}` — not a string \
+                         value on `{}::{}` (fix the `{}` skill page)",
+                        page.skill, page.id, page.skill
+                    ))
+                })?;
+            out.push_str(value);
+        } else {
+            return Err(peacock_types::Error::render(format!(
+                "action template `{template}`: unknown placeholder `{{{name}}}`"
+            )));
+        }
+        rest = &rest[open + close + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
 }
 
 /// Build the chat card from the report's FIRST instance alias (deterministic

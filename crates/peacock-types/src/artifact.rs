@@ -27,6 +27,12 @@ pub struct StructuredContent {
     /// row-report artifacts stay byte-identical to before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instances: Option<Value>,
+    /// The `document` pseudo-report's contract: `{ skill, id, actions }` —
+    /// the rendered instance's identity plus the affordances its SKILL page
+    /// declares (`actions:` frontmatter). Absent on every other report, so
+    /// existing artifacts stay byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document: Option<Value>,
 }
 
 /// One render's output, shared verbatim across every surface (FR-R-1/2).

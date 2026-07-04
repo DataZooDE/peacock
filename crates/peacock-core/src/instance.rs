@@ -63,6 +63,21 @@ pub trait InstanceData: Send + Sync {
         principal: &Principal,
         trace: Option<&TraceSink>,
     ) -> Result<Vec<InstanceEvent>>;
+
+    /// Capture a document action's event (`emit_document_event`): peacock's
+    /// only write path, and it writes as the CALLER — the principal's bearer
+    /// is forwarded per request exactly like every read, so escurel's
+    /// fail-closed ACL gates it. Source `"peacock"`; escurel mints the id.
+    /// Returns the minted event id.
+    async fn capture_document_event(
+        &self,
+        label_skill: &str,
+        instance_page_id: &str,
+        title: &str,
+        body: &str,
+        principal: &Principal,
+        trace: Option<&TraceSink>,
+    ) -> Result<String>;
 }
 
 #[async_trait]
@@ -166,5 +181,44 @@ impl InstanceData for crate::data::EscurelData {
                 body: e.body,
             })
             .collect())
+    }
+
+    async fn capture_document_event(
+        &self,
+        label_skill: &str,
+        instance_page_id: &str,
+        title: &str,
+        body: &str,
+        principal: &Principal,
+        trace: Option<&TraceSink>,
+    ) -> Result<String> {
+        let token = SecretString::from(principal.raw_token.clone());
+        let client = Client::connect(self.endpoint(), token)
+            .await
+            .map_err(map_err)?;
+        let event = client
+            .capture_event(escurel_client::CaptureEventRequest {
+                source: "peacock".to_owned(),
+                mime: "text/plain".to_owned(),
+                label_skill: label_skill.to_owned(),
+                instance_page_id: instance_page_id.to_owned(),
+                title: title.to_owned(),
+                body: body.to_owned(),
+                ..Default::default()
+            })
+            .await
+            .map_err(map_err)?;
+
+        crate::record(
+            trace,
+            json!({
+                "hop": "peacock→escurel",
+                "method": "capture_event",
+                "request": { "label_skill": label_skill, "instance_page_id": instance_page_id },
+                "response": { "event_id": event.event_id },
+            }),
+        );
+
+        Ok(event.event_id)
     }
 }

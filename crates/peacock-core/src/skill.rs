@@ -123,7 +123,7 @@ impl InstanceRef {
 /// The instance-id charset: alphanumeric start, then alphanumeric plus
 /// `- _ .` — and never `..` (no traversal), max 128. Everything an escurel
 /// page slug allows, nothing a path or wikilink could smuggle.
-fn is_slug(s: &str) -> bool {
+pub fn is_slug(s: &str) -> bool {
     let ok_chars = s.len() <= 128
         && s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
         && s.chars()
@@ -143,6 +143,51 @@ pub enum Agg {
     Avg,
 }
 
+/// The `viewer:` declaration on an instance's SKILL page: the authored
+/// report that best renders one instance of this skill — the `document`
+/// pseudo-report delegates to it (`{param: <instance id>}`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewerSpec {
+    pub report: String,
+    pub param: String,
+}
+
+/// What a document action does when clicked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActionKind {
+    /// Send a prepared prompt back to the chat as a new user turn.
+    Prompt,
+    /// Capture an escurel event (via `emit_document_event`) — the existing
+    /// webhook/worker chains take it from there.
+    Event,
+}
+
+/// One action declared in the skill page's `actions:` frontmatter. The
+/// skill page is the contract: nothing about a record type's affordances
+/// is hardcoded in peacock or the agent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionSpec {
+    /// The wire id (`emit_document_event` receives it back) — a slug.
+    pub name: String,
+    pub kind: ActionKind,
+    /// The button label the document view shows.
+    pub label: String,
+    /// `kind: prompt` — the prompt template (`{id}`, `{frontmatter.<key>}`).
+    pub prompt: Option<String>,
+    /// `kind: event` — what to capture. Never shipped to the client.
+    pub event: Option<EventSpec>,
+}
+
+/// The event an `ActionKind::Event` action captures. `title`/`body` are
+/// templates substituted server-side against the target instance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EventSpec {
+    /// The event's label skill (escurel `capture_event.label_skill`).
+    pub label_skill: String,
+    pub title: String,
+    pub body: String,
+}
+
 /// A parsed report skill.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReportSkill {
@@ -158,6 +203,12 @@ pub struct ReportSkill {
     pub specs: std::collections::BTreeMap<String, Value>,
     /// The agent-authored narrative (skill body).
     pub narrative: String,
+    /// `viewer:` — set on an INSTANCE skill page (account, email, …), read
+    /// by the `document` pseudo-report. Reports themselves leave it unset.
+    pub viewer: Option<ViewerSpec>,
+    /// `actions:` — the document affordances an instance skill page
+    /// declares. Empty on report pages.
+    pub actions: Vec<ActionSpec>,
 }
 
 impl ReportSkill {
@@ -205,6 +256,8 @@ impl ReportSkill {
             .unwrap_or_default();
 
         let views = parse_views(id, fm)?;
+        let viewer = parse_viewer(id, fm)?;
+        let actions = parse_actions(id, fm)?;
 
         Ok(ReportSkill {
             id: id.to_owned(),
@@ -214,8 +267,128 @@ impl ReportSkill {
             views,
             specs,
             narrative: body.to_owned(),
+            viewer,
+            actions,
         })
     }
+}
+
+/// Parse the `viewer:` declaration (see [`ViewerSpec`]). `document` may not
+/// be a viewer — the pseudo-report would recurse.
+fn parse_viewer(id: &str, fm: &Value) -> Result<Option<ViewerSpec>> {
+    let Some(v) = fm.get("viewer") else {
+        return Ok(None);
+    };
+    let report = v
+        .get("report")
+        .and_then(Value::as_str)
+        .filter(|s| is_slug(s))
+        .ok_or_else(|| {
+            Error::render(format!(
+                "skill `{id}`: viewer.report must be a report-skill slug"
+            ))
+        })?;
+    if report == "document" {
+        return Err(Error::render(format!(
+            "skill `{id}`: `document` is the reserved pseudo-report and cannot be a viewer"
+        )));
+    }
+    let param = v
+        .get("param")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            Error::render(format!(
+                "skill `{id}`: viewer.param must name the report param the instance id binds to"
+            ))
+        })?;
+    Ok(Some(ViewerSpec {
+        report: report.to_owned(),
+        param: param.to_owned(),
+    }))
+}
+
+/// Parse the `actions:` list (see [`ActionSpec`]). Author errors fail the
+/// parse — a malformed action never reaches a document view half-working.
+fn parse_actions(id: &str, fm: &Value) -> Result<Vec<ActionSpec>> {
+    let arr = match fm.get("actions") {
+        Some(Value::Array(a)) => a,
+        Some(_) => {
+            return Err(Error::render(format!(
+                "skill `{id}`: actions must be a list"
+            )));
+        }
+        None => return Ok(Vec::new()),
+    };
+    let mut out = Vec::with_capacity(arr.len());
+    for a in arr {
+        let name = a
+            .get("name")
+            .and_then(Value::as_str)
+            .filter(|s| is_slug(s))
+            .ok_or_else(|| Error::render(format!("skill `{id}`: an action needs a slug `name`")))?;
+        let label = a
+            .get("label")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                Error::render(format!(
+                    "skill `{id}`: action `{name}` needs a non-empty `label`"
+                ))
+            })?;
+        let kind = match a.get("kind").and_then(Value::as_str) {
+            Some("prompt") => ActionKind::Prompt,
+            Some("event") => ActionKind::Event,
+            other => {
+                return Err(Error::render(format!(
+                    "skill `{id}`: action `{name}` has unknown kind {other:?} (prompt|event)"
+                )));
+            }
+        };
+        let prompt = a.get("prompt").and_then(Value::as_str).map(str::to_owned);
+        let event = match kind {
+            ActionKind::Prompt => {
+                if prompt.is_none() {
+                    return Err(Error::render(format!(
+                        "skill `{id}`: prompt action `{name}` needs a `prompt` template"
+                    )));
+                }
+                None
+            }
+            ActionKind::Event => {
+                let label_skill = a
+                    .get("event")
+                    .and_then(Value::as_str)
+                    .filter(|s| is_slug(s))
+                    .ok_or_else(|| {
+                        Error::render(format!(
+                            "skill `{id}`: event action `{name}` needs a slug `event` label skill"
+                        ))
+                    })?;
+                Some(EventSpec {
+                    label_skill: label_skill.to_owned(),
+                    title: a
+                        .get("title")
+                        .and_then(Value::as_str)
+                        .unwrap_or("{id}")
+                        .to_owned(),
+                    body: a
+                        .get("body")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                })
+            }
+        };
+        out.push(ActionSpec {
+            name: name.to_owned(),
+            kind,
+            label: label.to_owned(),
+            prompt,
+            event,
+        });
+    }
+    Ok(out)
 }
 
 /// Extract the bare ref from a wikilink: `[[query::nw_x]]` → `nw_x`,

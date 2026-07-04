@@ -24,9 +24,15 @@ pub use author::{
 };
 pub use data::{Column, EscurelData, ReportData, RowSet};
 pub use instance::{InstanceData, InstancePage};
-pub use render::{RenderOpts, promotable_selection, render, render_a2ui_to_png, view_state_record};
+pub use render::{
+    DOCUMENT_REPORT_ID, RenderOpts, emit_document_event, promotable_selection, render,
+    render_a2ui_to_png, view_state_record,
+};
 pub use saved::{BOOKMARK_SKILL, SavedRef, render_saved, resolve_saved_instance, save_instance};
-pub use skill::{Agg, InstanceRef, ReportSkill, ReportSkills, ViewSpec};
+pub use skill::{
+    ActionKind, ActionSpec, Agg, EventSpec, InstanceRef, ReportSkill, ReportSkills, ViewSpec,
+    ViewerSpec, is_slug,
+};
 
 /// A sink that captures the **real** escurel-client wire payloads a render
 /// issues (resolve + query_instance, request and response), so a surface can
