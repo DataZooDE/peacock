@@ -273,8 +273,8 @@ async fn tools_call_instance_report_carries_the_typed_contract() {
     );
     assert!(inst["events"].as_array().is_some(), "timeline contract");
     assert_eq!(
-        res["_meta"]["ui"]["resourceUri"],
-        "ui://peacock/customer-report"
+        res["_meta"]["ui"]["resourceUri"], "ui://peacock/customer-report?account=beverages-gmbh",
+        "the caller's params ride the ui link"
     );
     // The chat surface: a chartless instance report still carries a PNG —
     // the themed INSTANCE CARD (protocol adaptation on this endpoint too).
@@ -315,5 +315,87 @@ async fn resources_read_is_themed_and_escapes_before_formatting() {
     // and the markdown renderer formats the ESCAPED line.
     assert!(html.contains("const esc ="));
     assert!(html.contains("esc(raw.trim())"), "escape-then-format");
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn caller_params_ride_the_resource_uri_and_seed_the_iframe() {
+    // A param-REQUIRED report (nba/customer style) is unrenderable from a
+    // bare ui:// URI — the CALLER's params must ride the resource link and
+    // seed the served runtime's first render (the drill loop then owns
+    // them). A caller that sent none keeps the bare URI (byte-compat).
+    let (nw, base) = start_with_customer_report().await;
+
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "render_report", "arguments": {
+            "report_id": "customer-report",
+            "params": { "account": "beverages-gmbh" },
+        }}),
+    )
+    .await;
+    assert_eq!(
+        r["result"]["_meta"]["ui"]["resourceUri"],
+        "ui://peacock/customer-report?account=beverages-gmbh",
+        "the caller's params ride the resource link: {}",
+        r["result"]["_meta"]
+    );
+
+    // The served runtime carries those params as its initial render vector.
+    let res = rpc(
+        &base,
+        "resources/read",
+        json!({ "uri": "ui://peacock/customer-report?account=beverages-gmbh" }),
+    )
+    .await;
+    let html = res["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(
+        html.contains(r#""account":"beverages-gmbh""#),
+        "the iframe seeds the initial params: {}",
+        &html[..500]
+    );
+    assert!(
+        !html.contains("__INITIAL_PARAMS__"),
+        "placeholder substituted"
+    );
+    assert!(!html.contains("__THEME_CSS__"));
+
+    // No caller params → the bare URI, exactly as before.
+    let bare = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "render_report", "arguments": { "report_id": NW_REPORT } }),
+    )
+    .await;
+    assert_eq!(
+        bare["result"]["_meta"]["ui"]["resourceUri"],
+        format!("ui://peacock/{NW_REPORT}"),
+    );
+
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_iframe_surfaces_render_errors_and_derives_drill_chips() {
+    // The runtime must SHOW a failed render (an invalid params error), never
+    // the empty state; and its drill chips exist only for reports that
+    // DECLARE the drill dimension (param_schema-driven, nothing hardcoded).
+    let (nw, base) = start_with_customer_report().await;
+    let res = rpc(
+        &base,
+        "resources/read",
+        json!({ "uri": "ui://peacock/customer-report" }),
+    )
+    .await;
+    let html = res["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(
+        html.contains("renderError") || html.contains("data.error"),
+        "the runtime has an error-surfacing path"
+    );
+    assert!(
+        html.contains("param_schema") && !html.contains("allCats"),
+        "drill chips derive from the declared schema, not a hardcoded list"
+    );
     nw.shutdown().await;
 }

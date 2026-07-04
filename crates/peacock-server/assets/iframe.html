@@ -41,6 +41,7 @@
   .tl .ev .bd { font-size:12.5px; white-space:pre-wrap; overflow-wrap:anywhere; }
 </style>
 <style id="pk-theme">__THEME_CSS__</style>
+<script type="application/json" id="pk-init">__INITIAL_PARAMS__</script>
 </head>
 <body>
   <div class="wrap" id="app"><div class="muted">Loading report…</div></div>
@@ -50,13 +51,20 @@
 // (compact view-state). Falls back to peacock's own HTTP endpoint when opened
 // standalone (no MCP host), so the resource is independently verifiable.
 const REPORT_ID = "__REPORT_ID__";
+// The caller's params, minted into the ui:// URI by the tool result — the
+// FIRST render of a param-required report depends on them; drills then
+// accrue on top.
+const INITIAL_PARAMS = (() => {
+  try { return JSON.parse(document.getElementById("pk-init").textContent) || {}; }
+  catch (_) { return {}; }
+})();
 const money = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
 // EVERY dynamic string is escaped before it touches innerHTML — instance
 // bodies, facts and event titles are agent-/user-authored content.
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
   ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
 const titleize = k => esc(k).replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-let params = {};
+let params = { ...INITIAL_PARAMS };
 
 // Markdown, escape-then-format: the WHOLE line is escaped first, then a few
 // line-level transforms build structure. No raw HTML ever passes through.
@@ -129,9 +137,23 @@ function instanceHtml(alias, inst) {
 }
 
 function render(data) {
+  // A failed render is SHOWN, never swallowed into the empty state — the
+  // JSON-RPC error message (bad params, ACL denial) is the useful signal.
+  const renderError = data && (data.error || (data.isError === true && data.content));
+  if (renderError) {
+    const msg = typeof data.error === "string" ? data.error
+      : (data.error && (data.error.message || JSON.stringify(data.error)))
+        || (Array.isArray(data.content) && data.content[0] && data.content[0].text)
+        || "render failed";
+    document.getElementById("app").innerHTML =
+      `<div class="head"><div class="t">Couldn\u2019t render ${esc(REPORT_ID)}</div></div>
+       <div class="muted" style="white-space:pre-wrap">${esc(msg)}</div>`;
+    return;
+  }
   const sc = (data && data.structuredContent) || data || {};
   const rows = sc.rows || [];
   params = sc.current_params || params;
+  const schema = sc.param_schema || {};
   const png = (data && data._meta && data._meta.png_base64) || sc.png_base64;
 
   const parts = [];
@@ -140,23 +162,27 @@ function render(data) {
   for (const [alias, inst] of Object.entries(sc.instances || {}))
     parts.push(instanceHtml(alias, inst));
 
-  // Row report: KPI + chart + drill chips + table (the Northwind demo shape).
+  // Row report: KPI + chart + drill chips + table. The drill chips exist
+  // ONLY when the report DECLARES a `category` param (param_schema-driven —
+  // a report without the dimension must not invite a drill it would reject).
   if (rows.length) {
-    const total = rows.reduce((a,r)=>a+(+r.revenue||0),0);
-    const cats = [...new Set(rows.map(r=>r.category))];
-    const scope = params.category && params.category!=="ALL" ? params.category : "All categories";
-    const allCats = ["ALL","Beverages","Condiments","Dairy Products","Produce","Seafood"];
+    const cols = rows.length ? Object.keys(rows[0]) : [];
+    const numeric = [...cols].reverse().find(c => rows.some(r => typeof r[c] === "number")) || "";
+    const total = rows.reduce((a,r)=>a+(+r[numeric]||0),0);
+    const scope = params.category && params.category!=="ALL" ? params.category : "";
+    const canDrill = !!schema.category;
+    const cats = ["ALL", ...new Set(rows.map(r=>r.category).filter(Boolean))];
     parts.push(`
-      <div class="head"><div><div class="t">Northwind revenue by category</div>
-        <div class="sub">${esc(scope)} · live from escurel</div></div></div>
+      <div class="head"><div><div class="t">${titleize(REPORT_ID)}</div>
+        <div class="sub">${esc(scope || "live from escurel")}</div></div></div>
       <div class="kpis">
-        <div class="kpi"><div class="l">Total revenue</div><div class="v">${money(total)}</div></div>
-        <div class="kpi"><div class="l">Categories</div><div class="v" style="color:#201f1e">${cats.length}</div></div>
+        <div class="kpi"><div class="l">Total ${esc(numeric || "value")}</div><div class="v">${money(total)}</div></div>
+        <div class="kpi"><div class="l">Rows</div><div class="v" style="color:#201f1e">${rows.length}</div></div>
       </div>
       ${png ? `<img alt="chart" src="data:image/png;base64,${png}">` : ""}
-      <div class="chips">${allCats.map(c=>`<span class="chip ${(params.category||'ALL')===c?'on':''}" data-cat="${esc(c)}">${esc(c==='ALL'?'All':c)}</span>`).join("")}</div>
-      <table><tr><th>Month</th><th>Category</th><th class="num">Revenue</th></tr>
-        ${rows.map(r=>`<tr><td>${esc(r.month)}</td><td>${esc(r.category)}</td><td class="num">${money(r.revenue)}</td></tr>`).join("")}</table>`);
+      ${canDrill ? `<div class="chips">${cats.map(c=>`<span class="chip ${(params.category||'ALL')===c?'on':''}" data-cat="${esc(c)}">${esc(c==='ALL'?'All':c)}</span>`).join("")}</div>` : ""}
+      <table><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr>
+        ${rows.map(r=>`<tr>${cols.map(c=>`<td>${esc(typeof r[c]==="number"?(+r[c]).toLocaleString("en-US"):r[c])}</td>`).join("")}</tr>`).join("")}</table>`);
   } else if (!parts.length) {
     parts.push(`<div class="muted">Nothing to show.</div>`);
   }

@@ -169,7 +169,7 @@ async fn render_report_tool(state: &AppState, host: &str, args: Value) -> Respon
     )
     .await
     {
-        Ok(art) => Json(tool_result(&report_id, &art)).into_response(),
+        Ok(art) => Json(tool_result(&report_id, &report_params, &art)).into_response(),
         Err(e) => {
             let status = match e {
                 peacock_types::Error::Auth(_) => StatusCode::UNAUTHORIZED,

@@ -123,12 +123,15 @@ async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Valu
     )
     .await?;
 
-    Ok(tool_result(report_id, &art))
+    Ok(tool_result(report_id, &report_params, &art))
 }
 
 /// Build the MCP `tools/call` result: `structuredContent` + a text summary +
-/// `_meta.ui.resourceUri` so the host renders the iframe (FR-M-2).
-pub fn tool_result(report_id: &str, art: &Artifact) -> Value {
+/// `_meta.ui.resourceUri` so the host renders the iframe (FR-M-2). The
+/// CALLER's params ride the resource URI — a param-REQUIRED report (a
+/// customer record, a briefing) is unrenderable from a bare URI, so the
+/// served runtime seeds its first render from them.
+pub fn tool_result(report_id: &str, caller_params: &Value, art: &Artifact) -> Value {
     let png_b64 = art.png.as_ref().map(|p| {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(p)
@@ -138,10 +141,95 @@ pub fn tool_result(report_id: &str, art: &Artifact) -> Value {
         "structuredContent": art.structured_content,
         "isError": false,
         "_meta": {
-            "ui": { "resourceUri": format!("ui://{UI_AUTHORITY}/{report_id}") },
+            "ui": { "resourceUri": resource_uri(report_id, caller_params) },
             "png_base64": png_b64
         }
     })
+}
+
+/// `ui://peacock/<id>[?k=v&…]` — scalar caller params urlencoded into the
+/// resource URI. A caller that sent none keeps the bare URI (byte-compat
+/// with every pre-existing consumer).
+fn resource_uri(report_id: &str, params: &Value) -> String {
+    let base = format!("ui://{UI_AUTHORITY}/{report_id}");
+    let Some(obj) = params.as_object().filter(|o| !o.is_empty()) else {
+        return base;
+    };
+    let query: Vec<String> = obj
+        .iter()
+        .filter_map(|(k, v)| {
+            let s = match v {
+                Value::String(s) => s.clone(),
+                Value::Number(n) => n.to_string(),
+                Value::Bool(b) => b.to_string(),
+                _ => return None, // nested values don't ride a URI
+            };
+            Some(format!("{}={}", urlencode(k), urlencode(&s)))
+        })
+        .collect();
+    if query.is_empty() {
+        base
+    } else {
+        format!("{base}?{}", query.join("&"))
+    }
+}
+
+/// Minimal percent-encoding (RFC 3986 unreserved kept verbatim).
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Parse a resource URI's query back into the initial-params object,
+/// coercing scalars (the inverse of [`resource_uri`], lossy by design —
+/// only what a URI can carry).
+fn query_params(query: &str) -> Value {
+    let mut obj = serde_json::Map::new();
+    for pair in query.split('&').filter(|p| !p.is_empty()) {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        let (k, v) = (urldecode(k), urldecode(v));
+        let value = if let Ok(n) = v.parse::<i64>() {
+            json!(n)
+        } else if let Ok(f) = v.parse::<f64>() {
+            json!(f)
+        } else if v == "true" || v == "false" {
+            json!(v == "true")
+        } else {
+            Value::String(v)
+        };
+        obj.insert(k, value);
+    }
+    Value::Object(obj)
+}
+
+fn urldecode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(
+                &format!("{}{}", bytes[i + 1] as char, bytes[i + 2] as char),
+                16,
+            )
+        {
+            out.push(byte);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn summary(report_id: &str, art: &Artifact) -> String {
@@ -163,9 +251,19 @@ fn summary(report_id: &str, art: &Artifact) -> String {
 /// host can't fetch the multi-file Flutter bundle through `resources/read`).
 pub(crate) fn resources_read(state: &AppState, host: &str, params: &Value) -> Result<Value, Error> {
     let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
-    let report_id = uri
+    let rest = uri
         .strip_prefix(&format!("ui://{UI_AUTHORITY}/"))
         .ok_or_else(|| Error::validation(format!("not a peacock ui:// resource: {uri}")))?;
+    // `<report_id>[?initial params]` — the caller's params minted into the
+    // URI by [`tool_result`] seed the runtime's FIRST render (a
+    // param-required report is unrenderable from a bare URI).
+    let (report_id, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let initial = query_params(query);
+    // Serialized as a JSON literal into a <script type="application/json">
+    // island; `<` escaped so hostile param VALUES can never close the tag.
+    let initial_json = serde_json::to_string(&initial)
+        .unwrap_or_else(|_| "{}".into())
+        .replace('<', "\\u003c");
 
     // The resolved theme (brand = the deployment principal's tenant ⊕ the
     // Host flavor) styles the served runtime — the same registry the HTTP
@@ -178,6 +276,7 @@ pub(crate) fn resources_read(state: &AppState, host: &str, params: &Value) -> Re
             .replace("__REPORT_ID__", report_id),
         None => IFRAME_HTML
             .replace("__REPORT_ID__", report_id)
+            .replace("__INITIAL_PARAMS__", &initial_json)
             .replace("__THEME_CSS__", &theme.css),
     };
     Ok(json!({
