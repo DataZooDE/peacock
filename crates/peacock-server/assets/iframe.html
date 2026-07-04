@@ -34,6 +34,13 @@
   .md h3 { margin:.6em 0 .3em; font-size:15px; }
   .md ul { margin:.3em 0 .6em 1.2em; padding:0; }
   .md .link { color:var(--pk-accent, var(--accent)); font-weight:600; }
+  .md .wl { cursor:pointer; text-decoration:underline; text-decoration-style:dotted; }
+  .actions { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
+  .act { font-size:12px; padding:6px 12px; border-radius:999px; cursor:pointer;
+         border:1px solid var(--pk-accent, var(--accent)); background:#fff;
+         color:var(--pk-accent, var(--accent)); font-weight:600; }
+  .act.done { opacity:.65; cursor:default; }
+  .act.err { border-color:#a4262c; color:#a4262c; }
   .tl { border-left:2px solid var(--pk-accent, var(--accent)); margin:4px 0 12px 6px; padding-left:12px; }
   .tl .ev { margin-bottom:10px; }
   .tl .ev .tt { font-weight:600; font-size:13px; }
@@ -59,6 +66,12 @@ const INITIAL_PARAMS = (() => {
   catch (_) { return {}; }
 })();
 const money = n => "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+// The document currently shown (the `document` pseudo-report's identity);
+// wikilink navigation retargets it. Null for plain row/instance reports.
+let doc = REPORT_ID === "document" ? { skill: INITIAL_PARAMS.skill, id: INITIAL_PARAMS.id } : null;
+// A slug, exactly as the server enforces — only slug-shaped wikilink
+// segments become navigable.
+const isSlug = s => typeof s === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(s) && !s.includes("..");
 // EVERY dynamic string is escaped before it touches innerHTML — instance
 // bodies, facts and event titles are agent-/user-authored content.
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
@@ -74,7 +87,19 @@ function mdToHtml(md) {
   const flushPara = () => { if (para.length) { out.push(`<p>${para.join(" ")}</p>`); para = []; } };
   const flushList = () => { if (list) { out.push("</ul>"); list = false; } };
   for (const raw of String(md ?? "").split("\n")) {
-    const line = esc(raw.trim()).replace(/\[\[([^\]]+)\]\]/g, '<span class="link">$1</span>');
+    // `[[skill::id]]` with slug-shaped segments becomes a navigable link to
+    // that document; any other wikilink stays a styled, inert span. The
+    // segments were escaped with the whole line and re-checked as slugs, so
+    // nothing attribute-breaking can ride data-skill/data-id.
+    const line = esc(raw.trim()).replace(/\[\[([^\]]+)\]\]/g, (_, inner) => {
+      const sep = inner.indexOf("::");
+      if (sep > 0) {
+        const s = inner.slice(0, sep), i = inner.slice(sep + 2);
+        if (isSlug(s) && isSlug(i))
+          return `<span class="link wl" data-skill="${s}" data-id="${i}">${inner}</span>`;
+      }
+      return `<span class="link">${inner}</span>`;
+    });
     if (!line) { flushPara(); flushList(); continue; }
     if (line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ")) {
       flushPara(); flushList();
@@ -95,10 +120,18 @@ function mdToHtml(md) {
 function callServerTool(name, args) {
   return new Promise((resolve, reject) => {
     if (window.parent === window) {
-      // standalone: call peacock directly
-      fetch("/v1/render_report", { method:"POST", headers:{ "content-type":"application/json" },
-        body: JSON.stringify({ report_id: args.report_id, params: args.params, png: true }) })
-        .then(r => r.json()).then(resolve, reject);
+      // standalone: call peacock directly — render via the HTTP endpoint,
+      // any other tool via peacock's own /mcp (same origin).
+      if (name === "render_report") {
+        fetch("/v1/render_report", { method:"POST", headers:{ "content-type":"application/json" },
+          body: JSON.stringify({ report_id: args.report_id, params: args.params, png: true }) })
+          .then(r => r.json()).then(resolve, reject);
+      } else {
+        fetch("/mcp", { method:"POST", headers:{ "content-type":"application/json" },
+          body: JSON.stringify({ jsonrpc:"2.0", id:1, method:"tools/call",
+                                 params:{ name, arguments: args } }) })
+          .then(r => r.json()).then(j => resolve(j.error ? j : j.result), reject);
+      }
       return;
     }
     const reqId = "r" + Math.random().toString(36).slice(2);
@@ -114,6 +147,24 @@ function callServerTool(name, args) {
 function updateModelContext(record) {
   if (window.parent !== window)
     window.parent.postMessage({ type:"mcp:updateModelContext", record }, "*");
+}
+// A `prompt` document action: hand the prepared text to the host, which
+// sends it as a NEW USER TURN in the chat. Standalone (no host) it is a
+// no-op — the button is disabled there.
+function sendPrompt(text) {
+  if (window.parent !== window)
+    window.parent.postMessage({ type:"mcp:prompt", text }, "*");
+}
+
+// Navigate to another document: a fresh `document` render (drill pattern —
+// absolute params, DOM swap) + a compact view-state record for the model.
+async function openDoc(skill, id) {
+  doc = { skill, id };
+  const data = await callServerTool("render_report",
+    { report_id: "document", params: { skill, id } });
+  render(data);
+  updateModelContext({ report_id: "document", params: { skill, id },
+                       salient_summary: `viewing ${skill}::${id}` });
 }
 
 // One instance alias → facts grid + markdown + timeline (whatever the report
@@ -162,6 +213,20 @@ function render(data) {
   for (const [alias, inst] of Object.entries(sc.instances || {}))
     parts.push(instanceHtml(alias, inst));
 
+  // Document actions: the affordances the target's SKILL page declares
+  // (`actions:` frontmatter, substituted server-side). Prompt actions need
+  // a host chat (disabled standalone); event actions round-trip through
+  // `emit_document_event`.
+  const docActions = (sc.document && sc.document.actions) || [];
+  if (sc.document) doc = { skill: sc.document.skill, id: sc.document.id };
+  if (docActions.length) {
+    const standalone = window.parent === window;
+    parts.push(`<div class="actions">${docActions.map((a, i) => {
+      const off = a.kind === "prompt" && standalone;
+      return `<span class="act${off ? " done" : ""}" data-act="${i}"${off ? ' title="needs a chat host"' : ""}>${esc(a.label)}</span>`;
+    }).join("")}</div>`);
+  }
+
   // Row report: KPI + chart + drill chips + table. The drill chips exist
   // ONLY when the report DECLARES a `category` param (param_schema-driven —
   // a report without the dimension must not invite a drill it would reject).
@@ -189,6 +254,31 @@ function render(data) {
 
   document.getElementById("app").innerHTML = parts.join("");
   document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => drill(ch.dataset.cat));
+  // Wikilink navigation: any `[[skill::id]]` in a rendered body opens that
+  // document in place (a fresh absolute render, like a drill).
+  document.querySelectorAll(".wl").forEach(w =>
+    w.onclick = () => openDoc(w.dataset.skill, w.dataset.id));
+  // Document action chips.
+  document.querySelectorAll(".act").forEach(el => el.onclick = async () => {
+    if (el.classList.contains("done")) return;
+    const a = docActions[+el.dataset.act];
+    if (!a) return;
+    if (a.kind === "prompt") { sendPrompt(a.prompt || ""); return; }
+    // kind === "event": capture in escurel via the server-validated tool.
+    el.classList.add("done");
+    const was = el.textContent;
+    el.textContent = "…";
+    try {
+      const r = await callServerTool("emit_document_event",
+        { skill: doc.skill, id: doc.id, action: a.name });
+      const err = r && (r.error || (r.result && r.result.error));
+      if (err) throw new Error(typeof err === "string" ? err : (err.message || JSON.stringify(err)));
+      el.textContent = `✓ ${was}`;
+    } catch (e) {
+      el.classList.remove("done"); el.classList.add("err");
+      el.textContent = `${was} — ${String(e && e.message || e).slice(0, 120)}`;
+    }
+  });
 }
 
 async function drill(cat) {

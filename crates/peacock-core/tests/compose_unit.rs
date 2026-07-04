@@ -52,6 +52,8 @@ fn report(specs: Value, views: Vec<ViewSpec>) -> ReportSkill {
         views,
         specs: specs.as_object().unwrap().clone().into_iter().collect(),
         narrative: "EMEA orders only.".into(),
+        viewer: None,
+        actions: Vec::new(),
     }
 }
 
@@ -283,6 +285,8 @@ fn instance_skill(views: Vec<ViewSpec>) -> ReportSkill {
         views,
         specs: BTreeMap::new(),
         narrative: String::new(),
+        viewer: None,
+        actions: Vec::new(),
     }
 }
 

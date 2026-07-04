@@ -123,3 +123,100 @@ async fn triton_proxies_render_report_and_the_ui_resource() {
 
     nw.shutdown().await;
 }
+
+/// A document `event` action dispatched BY Triton (`X-Triton-Tool:
+/// emit_document_event`): validated against the skill page, captured in
+/// escurel — the whole Sources-action chain minus the browser.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn triton_dispatches_emit_document_event() {
+    const ACTIONS_ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+        description: A customer account.\nrequired_frontmatter: [id, name]\n\
+        actions:\n\
+        \x20 - name: renewal-at-risk\n\
+        \x20   kind: event\n\
+        \x20   label: Flag renewal at risk\n\
+        \x20   event: follow_up\n\
+        \x20   title: \"{frontmatter.name}\"\n\
+        \x20   body: \"renewal at risk\"\n\
+        ---\n# account\n";
+    const ACCOUNT: &str = "---\ntype: instance\nskill: account\nid: initech-corp\n\
+        name: Initech Corp\n---\n# Initech Corp\n";
+
+    let nw = NorthwindEscurel::spawn_with(peacock_test_support::NorthwindOpts {
+        extra_skills: vec![("account".to_owned(), ACTIONS_ACCOUNT_SKILL.to_owned())],
+        extra_instances: vec![(
+            "account".to_owned(),
+            "initech-corp".to_owned(),
+            ACCOUNT.to_owned(),
+        )],
+        ..Default::default()
+    })
+    .await;
+    let state = Arc::new(AppState {
+        escurel: EscurelData::new(nw.endpoint()),
+        principal: nw.sales_principal(),
+        png_scale: 2.0,
+        demo_html: "<!doctype html>",
+        flutter_dir: None,
+        flutter_app_url: None,
+        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        triton_url: None,
+        upstream_capture: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peacock = listener.local_addr().unwrap();
+    drop(listener);
+    let st = state.clone();
+    tokio::spawn(async move { serve(peacock, st).await.unwrap() });
+    for _ in 0..50 {
+        if reqwest::get(format!("http://{peacock}/healthz"))
+            .await
+            .is_ok()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let env = HashMap::from([
+        ("TRITON_ENV".into(), "nonprod".into()),
+        (
+            "TRITON_STATIC_UPSTREAMS".into(),
+            format!("render_report={peacock},emit_document_event={peacock},peacock={peacock}"),
+        ),
+    ]);
+    let triton = TritonProcess::spawn_with_env(Duration::from_secs(10), env).await;
+    let http = reqwest::Client::new();
+
+    let call = triton_mcp(
+        &triton,
+        &http,
+        "tools/call",
+        json!({ "name": "emit_document_event", "arguments": {
+            "skill": "account", "id": "initech-corp", "action": "renewal-at-risk",
+        }}),
+    )
+    .await;
+    let text = serde_json::to_string(&call).unwrap();
+    assert!(
+        text.contains("\"ok\":true") && text.contains("event_id"),
+        "the event action round-tripped through Triton: {text}"
+    );
+
+    // The event is really in escurel, templates substituted server-side.
+    let client = nw.sales_client().await;
+    let inbox = client
+        .list_inbox(escurel_client::ListInboxRequest { limit: 50 })
+        .await
+        .expect("list inbox");
+    assert!(
+        inbox
+            .events
+            .iter()
+            .any(|e| e.source == "peacock" && e.title == "Initech Corp"),
+        "captured: {:?}",
+        inbox.events
+    );
+
+    nw.shutdown().await;
+}

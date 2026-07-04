@@ -95,6 +95,23 @@ pub async fn handle(
 async fn tool_call(state: &AppState, host: &str, tool: &str, args: Value) -> Response {
     match tool {
         "render_report" => render_report_tool(state, host, args).await,
+        // A document action's event, validated against the skill page and
+        // captured in escurel as the caller (see `mcp::emit_document_event`).
+        "emit_document_event" => match crate::mcp::emit_document_event(state, &args).await {
+            Ok(r) => Json(r).into_response(),
+            Err(e) => {
+                let status = match e {
+                    peacock_types::Error::Auth(_) => StatusCode::UNAUTHORIZED,
+                    peacock_types::Error::Validation(_) => StatusCode::BAD_REQUEST,
+                    _ => StatusCode::BAD_GATEWAY,
+                };
+                (
+                    status,
+                    Json(json!({ "error": e.kind(), "message": e.to_string() })),
+                )
+                    .into_response()
+            }
+        },
         // Part D (#143 D): rasterize Triton's dashboard `{title, tiles}` to a
         // PNG and return it base64-encoded — the capability Triton's chat
         // surface delegates to via TRITON_RASTERIZE_UPSTREAM.

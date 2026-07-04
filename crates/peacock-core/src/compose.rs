@@ -191,6 +191,7 @@ pub fn compose(
         param_schema: serde_json::to_value(&skill.params).unwrap_or(Value::Null),
         current_params: params_to_json(params),
         instances: instances_content(skill, pages),
+        document: None,
     };
 
     Ok(Artifact {

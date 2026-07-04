@@ -131,6 +131,7 @@ fn artifact_carries_a2ui_vega_structured_and_optional_png() {
         param_schema: json!({ "category": { "type": "string" } }),
         current_params: json!({ "category": "Beverages", "from": "1997-01-01" }),
         instances: None,
+        document: None,
     };
     let art = Artifact {
         a2ui: json!({ "version": "0.9", "components": [] }),
