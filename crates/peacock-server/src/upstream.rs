@@ -95,6 +95,9 @@ pub async fn handle(
 async fn tool_call(state: &AppState, host: &str, tool: &str, args: Value) -> Response {
     match tool {
         "render_report" => render_report_tool(state, host, args).await,
+        // The resolved deployment theme as data — peacock owns all theming;
+        // chat adapters brand their card chrome from this (see `mcp::get_theme`).
+        "get_theme" => Json(crate::mcp::get_theme(state, host)).into_response(),
         // A document action's event, validated against the skill page and
         // captured in escurel as the caller (see `mcp::emit_document_event`).
         "emit_document_event" => match crate::mcp::emit_document_event(state, &args).await {

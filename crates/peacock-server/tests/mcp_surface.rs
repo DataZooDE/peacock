@@ -620,3 +620,114 @@ async fn emit_document_event_fails_closed() {
 
     nw.shutdown().await;
 }
+
+// ── get_theme: peacock owns ALL theming; adapters consume it as data ──
+
+#[tokio::test]
+async fn get_theme_returns_the_resolved_brand_as_data() {
+    // In-proc state with a registered brand (what PEACOCK_BRAND_CSS does at
+    // boot): the tool returns the RESOLVED chrome + css for tenant ⊕ host.
+    let nw = NorthwindEscurel::spawn().await;
+    let mut themes = peacock_rasterizer::ThemeRegistry::builtin();
+    themes.register_brand(
+        "acme",
+        ":root { --pk-name: \"DataZoo\"; --pk-brand: #1a73e8; \
+         --pk-logo: https://brand.example/logo.png; --pk-logo-style: banner; }",
+    );
+    let state = Arc::new(AppState {
+        escurel: EscurelData::new(nw.endpoint()),
+        principal: nw.sales_principal(),
+        png_scale: 2.0,
+        demo_html: "<!doctype html>",
+        flutter_dir: None,
+        flutter_app_url: None,
+        themes,
+        triton_url: None,
+        upstream_capture: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener);
+    tokio::spawn(async move { serve(addr, state).await.unwrap() });
+    for _ in 0..50 {
+        if reqwest::get(format!("http://{addr}/healthz")).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let base = format!("http://{addr}");
+
+    let tools = rpc(&base, "tools/list", json!({})).await;
+    assert!(
+        tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "get_theme"),
+        "{tools}"
+    );
+
+    let r = rpc(&base, "tools/call", json!({ "name": "get_theme" })).await;
+    let theme = &r["result"];
+    assert_eq!(theme["brand"], "acme", "{r}");
+    assert_eq!(theme["title"], "DataZoo");
+    assert_eq!(theme["logo_url"], "https://brand.example/logo.png");
+    assert_eq!(theme["logo_style"], "banner");
+    assert_eq!(theme["brand_color"], "#1a73e8");
+    assert!(
+        theme["css"].as_str().unwrap().contains("--pk-name"),
+        "the composed css rides along for web chrome"
+    );
+
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn get_theme_falls_back_to_stock_for_unknown_brands() {
+    // An unconfigured deployment gets the stock look — data, never an error.
+    let (nw, base) = start().await;
+    let r = rpc(&base, "tools/call", json!({ "name": "get_theme" })).await;
+    let theme = &r["result"];
+    assert!(r.get("error").is_none(), "{r}");
+    assert_eq!(theme["logo_style"], "avatar");
+    assert_eq!(theme["brand_color"], "#0f6cbd", "stock brand colour: {r}");
+    assert!(theme["title"].is_null() && theme["logo_url"].is_null());
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn peacock_brand_css_boots_the_deployment_brand() {
+    // The REAL binary path: PEACOCK_BRAND_CSS registers the file under the
+    // deployment tenant at boot; get_theme serves it.
+    let dir = tempfile::tempdir().expect("tmpdir");
+    let css_path = dir.path().join("brand.css");
+    std::fs::write(
+        &css_path,
+        ":root { --pk-name: \"Initech\"; --pk-brand: #b71c1c; --pk-logo-style: banner; }",
+    )
+    .expect("write brand css");
+
+    let peacock = peacock_test_support::PeacockProcess::spawn(std::collections::HashMap::from([
+        ("PEACOCK_ESCUREL_URL".into(), "http://127.0.0.1:1".into()),
+        ("PEACOCK_TENANT".into(), "initech".into()),
+        (
+            "PEACOCK_BRAND_CSS".into(),
+            css_path.to_str().unwrap().to_string(),
+        ),
+    ]))
+    .await;
+
+    let r = rpc(
+        &peacock.base_url().to_string(),
+        "tools/call",
+        json!({ "name": "get_theme" }),
+    )
+    .await;
+    let theme = &r["result"];
+    assert_eq!(theme["brand"], "initech", "{r}");
+    assert_eq!(theme["title"], "Initech");
+    assert_eq!(theme["brand_color"], "#b71c1c");
+    assert_eq!(theme["logo_style"], "banner");
+
+    peacock.terminate();
+}

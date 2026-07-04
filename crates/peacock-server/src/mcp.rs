@@ -88,6 +88,13 @@ fn tools_list() -> Value {
             "required": ["report_id"]
         }
     }, {
+        "name": "get_theme",
+        "description": "The resolved theme for this deployment's brand and \
+                        the calling host — peacock owns ALL theming; chat \
+                        adapters consume this instead of carrying brand \
+                        config (title, logo, colours from one CSS source).",
+        "inputSchema": { "type": "object", "properties": {} }
+    }, {
         "name": "emit_document_event",
         "description": "Execute an `event` action a document's escurel SKILL \
                         page declares (`actions:` frontmatter): the event is \
@@ -111,6 +118,9 @@ fn tools_list() -> Value {
 async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Value, Error> {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let args = params.get("arguments").cloned().unwrap_or(json!({}));
+    if name == "get_theme" {
+        return Ok(get_theme(state, host));
+    }
     if name == "emit_document_event" {
         return emit_document_event(state, &args).await;
     }
@@ -166,6 +176,26 @@ pub(crate) async fn emit_document_event(state: &AppState, args: &Value) -> Resul
     )
     .await?;
     Ok(json!({ "ok": true, "event_id": event_id }))
+}
+
+/// `tools/call get_theme` → the RESOLVED theme for `(deployment tenant ⊕
+/// calling host)` as data — the same resolution every render site uses.
+/// Peacock owns all theming; a chat adapter brands its card chrome from
+/// this instead of carrying its own theme config. Never fails: unknown
+/// brands/hosts resolve to the stock look.
+pub(crate) fn get_theme(state: &AppState, host: &str) -> Value {
+    let theme = state.themes.resolve(&state.principal.tenant, host);
+    let t = &theme.tokens;
+    json!({
+        "brand": theme.brand,
+        "host": theme.host,
+        "title": t.name,
+        "logo_url": t.logo,
+        "logo_style": t.logo_style.as_str(),
+        "brand_color": t.brand,
+        "accent": t.accent,
+        "css": theme.css,
+    })
 }
 
 /// Build the MCP `tools/call` result: `structuredContent` + a text summary +

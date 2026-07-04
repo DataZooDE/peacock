@@ -22,6 +22,37 @@ use std::collections::BTreeMap;
 mod registry;
 pub use registry::ThemeRegistry;
 
+/// How a theme's `--pk-logo` is placed by chrome consumers (the chat-card
+/// header, web headers). Peacock owns ALL theming — chat adapters fetch the
+/// resolved theme (`get_theme`) instead of carrying their own brand config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogoStyle {
+    /// Small round image in the card header (square icon logos).
+    #[default]
+    Avatar,
+    /// Full-width image at the top of the card (wide wordmark logos).
+    Banner,
+}
+
+impl LogoStyle {
+    /// The wire name (`--pk-logo-style` value and the `get_theme` JSON).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogoStyle::Avatar => "avatar",
+            LogoStyle::Banner => "banner",
+        }
+    }
+
+    /// Parse a `--pk-logo-style` value; anything unrecognised is the default
+    /// (theming never fails a request).
+    pub fn parse(s: &str) -> Self {
+        match s.trim() {
+            "banner" => LogoStyle::Banner,
+            _ => LogoStyle::Avatar,
+        }
+    }
+}
+
 /// The token contract peacock reads to style a chart. Every field has a
 /// sensible default (the stock peacock look), so a theme need only override
 /// what it cares about.
@@ -56,6 +87,8 @@ pub struct ThemeTokens {
     pub logo: Option<String>,
     /// `--pk-name` — the company display name.
     pub name: Option<String>,
+    /// `--pk-logo-style` — how chrome consumers place the logo.
+    pub logo_style: LogoStyle,
 }
 
 impl Default for ThemeTokens {
@@ -75,6 +108,7 @@ impl Default for ThemeTokens {
             palette: tableau10(),
             logo: None,
             name: None,
+            logo_style: LogoStyle::default(),
         }
     }
 }
@@ -135,6 +169,9 @@ impl ThemeTokens {
         }
         t.logo = get("logo");
         t.name = get("name").map(|s| unquote(&s));
+        if let Some(v) = get("logo-style") {
+            t.logo_style = LogoStyle::parse(&v);
+        }
         // Categorical palette: --pk-cat-1, --pk-cat-2, … in order.
         let mut palette = Vec::new();
         for i in 1.. {

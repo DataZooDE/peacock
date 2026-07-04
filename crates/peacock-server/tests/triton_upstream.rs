@@ -220,3 +220,59 @@ async fn triton_dispatches_emit_document_event() {
 
     nw.shutdown().await;
 }
+
+/// `get_theme` dispatched BY Triton (`X-Triton-Tool: get_theme`): the chat
+/// adapter's brand source — peacock owns all theming; triton only consumes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn triton_dispatches_get_theme() {
+    let nw = NorthwindEscurel::spawn().await;
+    let mut themes = peacock_rasterizer::ThemeRegistry::builtin();
+    themes.register_brand(
+        "acme",
+        ":root { --pk-name: \"DataZoo\"; --pk-brand: #1a73e8; --pk-logo-style: banner; }",
+    );
+    let state = Arc::new(AppState {
+        escurel: EscurelData::new(nw.endpoint()),
+        principal: nw.sales_principal(),
+        png_scale: 2.0,
+        demo_html: "<!doctype html>",
+        flutter_dir: None,
+        flutter_app_url: None,
+        themes,
+        triton_url: None,
+        upstream_capture: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let peacock = listener.local_addr().unwrap();
+    drop(listener);
+    let st = state.clone();
+    tokio::spawn(async move { serve(peacock, st).await.unwrap() });
+    for _ in 0..50 {
+        if reqwest::get(format!("http://{peacock}/healthz"))
+            .await
+            .is_ok()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let env = HashMap::from([
+        ("TRITON_ENV".into(), "nonprod".into()),
+        (
+            "TRITON_STATIC_UPSTREAMS".into(),
+            format!("get_theme={peacock},peacock={peacock}"),
+        ),
+    ]);
+    let triton = TritonProcess::spawn_with_env(Duration::from_secs(10), env).await;
+    let http = reqwest::Client::new();
+
+    let call = triton_mcp(&triton, &http, "tools/call", json!({ "name": "get_theme" })).await;
+    let text = serde_json::to_string(&call).unwrap();
+    assert!(
+        text.contains("DataZoo") && text.contains("#1a73e8") && text.contains("banner"),
+        "the resolved theme round-tripped through Triton: {text}"
+    );
+
+    nw.shutdown().await;
+}
