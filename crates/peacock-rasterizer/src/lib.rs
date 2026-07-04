@@ -8,6 +8,7 @@
 //! vendored for deterministic, offline text. See the discovered note for why
 //! this replaces vl-convert.
 
+pub mod card;
 pub mod dashboard;
 mod logo;
 mod raster;
@@ -16,11 +17,12 @@ mod vegalite;
 
 pub use logo::{brand_css_from_logo, palette_from_png};
 
+pub use card::{InstanceCardRequest, render_instance_card_to_png, render_instance_card_to_svg};
 pub use dashboard::{DashboardRequest, render_dashboard_to_png, render_dashboard_to_svg};
 pub use raster::render_svg_to_png;
 pub use theme_apply::{
     apply_chart_theme, apply_dashboard_theme, render_dashboard_to_png_themed,
-    render_vega_to_png_themed, render_vega_to_svg_themed,
+    render_instance_card_to_png_themed, render_vega_to_png_themed, render_vega_to_svg_themed,
 };
 pub use vegalite::vegalite_to_svg;
 // Re-export so callers thread a theme without a second `use`.

@@ -276,6 +276,15 @@ async fn tools_call_instance_report_carries_the_typed_contract() {
         res["_meta"]["ui"]["resourceUri"],
         "ui://peacock/customer-report"
     );
+    // The chat surface: a chartless instance report still carries a PNG —
+    // the themed INSTANCE CARD (protocol adaptation on this endpoint too).
+    assert!(
+        res["_meta"]["png_base64"]
+            .as_str()
+            .is_some_and(|b| !b.is_empty()),
+        "instance-card png on tools/call: {}",
+        res["_meta"]
+    );
     nw.shutdown().await;
 }
 
