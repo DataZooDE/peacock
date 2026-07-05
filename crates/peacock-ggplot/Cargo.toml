@@ -1,0 +1,22 @@
+[package]
+name = "peacock-ggplot"
+edition.workspace = true
+rust-version.workspace = true
+version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+peacock-types = { workspace = true }
+peacock-theme = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+# The statistical backend (issue #6): Grammar-of-Graphics rendering through
+# plotters, headless in-memory PNG, fonts bundled — no polars (default
+# features off), no R, no network. Compiles ONLY when peacock-core's `ggplot`
+# feature is enabled; the base tree never pulls the plotters graph.
+ggplot-rs = { workspace = true }

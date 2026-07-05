@@ -10,6 +10,11 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Forward to the render core's statistical backend (issue #6): build the
+# `peacock` binary with `--features ggplot` to rasterize `geom:` report specs.
+ggplot = ["peacock-core/ggplot", "peacock-server/ggplot"]
+
 [[bin]]
 name = "peacock"
 path = "src/main.rs"

@@ -10,6 +10,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Forward to the render core's statistical backend (issue #6).
+ggplot = ["peacock-core/ggplot"]
+
 [dependencies]
 peacock-types = { workspace = true }
 peacock-core = { workspace = true }

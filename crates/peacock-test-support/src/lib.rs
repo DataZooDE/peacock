@@ -12,8 +12,8 @@ mod process;
 
 pub use northwind::{
     BOOKMARK_SKILL, NW_QUERY_COUNTRY, NW_QUERY_LEADERBOARD, NW_QUERY_LINES, NW_QUERY_PRODUCTS,
-    NW_QUERY_REF, NW_REPORT, NW_REPORT_COUNTRY, NW_REPORT_DISCOUNT, NW_REPORT_LEADERBOARD,
-    NW_REPORT_PRODUCTS, NW_REPORT_SEASON, NorthwindEscurel, NorthwindOpts, SALES_GROUP, TENANT,
-    skill_report_markdown,
+    NW_QUERY_REF, NW_REPORT, NW_REPORT_COUNTRY, NW_REPORT_DISCOUNT, NW_REPORT_DISTRIBUTION,
+    NW_REPORT_LEADERBOARD, NW_REPORT_PRODUCTS, NW_REPORT_SEASON, NorthwindEscurel, NorthwindOpts,
+    SALES_GROUP, TENANT, skill_report_distribution, skill_report_markdown,
 };
 pub use process::PeacockProcess;

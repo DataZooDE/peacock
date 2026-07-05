@@ -31,6 +31,11 @@ pub const NW_QUERY_LINES: &str = "nw_order_line_values";
 /// Revenue per salesperson, ranked best-first (horizontal leaderboard).
 pub const NW_REPORT_LEADERBOARD: &str = "northwind-salesperson-leaderboard";
 pub const NW_QUERY_LEADERBOARD: &str = "nw_revenue_by_salesperson";
+/// Order-line revenue distribution — a STATISTICAL spec (`geom: histogram`)
+/// for the pluggable `ggplot` backend (issue #6). NOT part of the default
+/// seed: pass it via [`NorthwindOpts::extra_skills`] with
+/// [`skill_report_distribution`].
+pub const NW_REPORT_DISTRIBUTION: &str = "northwind-revenue-distribution";
 
 /// Absolute path to the committed Northwind order-lines Parquet directory.
 fn order_lines_dir() -> PathBuf {
@@ -149,6 +154,35 @@ specs:
       color: { field: category, type: nominal }
 ---
 Revenue is recognised at order date, net of line discount. EMEA orders only.
+"#
+    .to_owned()
+}
+
+/// The `northwind-revenue-distribution` report skill: a STATISTICAL spec
+/// (top-level `geom`, issue #6) over the raw order-line values — the ggplot
+/// backend's histogram. Not seeded by default (the base Northwind world stays
+/// byte-identical); tests opt in via [`NorthwindOpts::extra_skills`].
+pub fn skill_report_distribution() -> String {
+    r#"---
+type: skill
+id: northwind-revenue-distribution
+render: a2ui
+description: Distribution of Northwind order-line revenue (EMEA).
+params:
+  from: { type: date, default: "1997-01-01" }
+  to:   { type: date, default: "1997-12-31" }
+data:
+  line_values: "[[query::nw_order_line_values]]"
+views:
+  - { kind: vega, data: line_values, spec: revenue_hist }
+specs:
+  revenue_hist:
+    geom: histogram
+    x: revenue
+    bins: 20
+    title: Order-line revenue distribution
+---
+Distribution of individual order-line revenue; EMEA orders only.
 "#
     .to_owned()
 }

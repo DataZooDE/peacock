@@ -40,6 +40,14 @@ pub struct StructuredContent {
 pub struct Artifact {
     pub a2ui: Value,
     pub vega_specs: Vec<Value>,
+    /// STATISTICAL specs (top-level `geom`, issue #6) the layout's
+    /// `kind: stat` components embed — the pluggable-backend peer of
+    /// `vega_specs`, rows injected inline the same way. Composed
+    /// unconditionally (backend-independent); only rasterization needs the
+    /// `ggplot` feature. Absent when no stat spec is authored, so existing
+    /// serialized artifacts stay byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stat_specs: Vec<Value>,
     pub structured_content: StructuredContent,
     /// PNG bytes, present only when a surface asked for rasterization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
