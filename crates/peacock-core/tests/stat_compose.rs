@@ -140,6 +140,67 @@ fn stat_spec_x_must_name_a_column_of_the_rowset() {
 }
 
 #[test]
+fn stat_spec_aesthetics_must_name_rowset_columns() {
+    // Issue #7: the column check extends beyond x to every aesthetic.
+    for spec in [
+        json!({ "geom": "density", "x": "revenue", "color": "no_such_column" }),
+        json!({ "geom": "density", "x": "revenue", "facet_wrap": "no_such_column" }),
+        json!({ "geom": "boxplot", "x": "category", "y": "no_such_column" }),
+    ] {
+        let err = compose_with(json!({ "revenue_hist": spec }))
+            .expect_err("an aesthetic naming a missing column must be rejected at compose");
+        assert!(
+            err.to_string().contains("no_such_column"),
+            "error names the column: {err}"
+        );
+    }
+}
+
+#[test]
+fn stat_spec_unknown_field_is_rejected() {
+    let err = compose_with(json!({
+        "revenue_hist": { "geom": "histogram", "x": "revenue", "colour": "category" }
+    }))
+    .expect_err("an unknown dialect field must be rejected, not silently dropped");
+    assert!(
+        err.to_string().contains("colour"),
+        "error names the field: {err}"
+    );
+}
+
+#[test]
+fn stat_spec_malformed_annotation_is_rejected() {
+    let err = compose_with(json!({
+        "revenue_hist": {
+            "geom": "histogram", "x": "revenue",
+            "annotations": [ { "kind": "vline" } ]
+        }
+    }))
+    .expect_err("a vline without `at` must be rejected at compose");
+    assert!(err.to_string().contains("at"), "error names `at`: {err}");
+}
+
+#[test]
+fn stat_spec_with_annotations_composes() {
+    let art = compose_with(json!({
+        "revenue_hist": {
+            "geom": "ecdf", "x": "revenue",
+            "color": "category", "facet_wrap": "category",
+            "annotations": [
+                { "kind": "vline", "at": 100.0, "label": "contract" },
+                { "kind": "p90" }
+            ]
+        }
+    }))
+    .expect("the full dialect surface composes (backend-independent)");
+    assert_eq!(art.stat_specs.len(), 1);
+    assert_eq!(
+        art.stat_specs[0]["annotations"].as_array().unwrap().len(),
+        2
+    );
+}
+
+#[test]
 fn vega_only_artifact_serializes_without_a_stat_specs_field() {
     // Byte-identity guard: an artifact with no authored stat spec must
     // serialize exactly as before this field existed.

@@ -186,9 +186,21 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
 
     let mut errors = Vec::new();
 
-    // 2. Guardrail each named spec (the exact check the renderer runs).
+    // 2. Guardrail each named spec (the exact checks the renderer runs).
+    //    A top-level `geom` key marks the STATISTICAL dialect (issue #7):
+    //    typed-parse it (known geom / fields / annotations) — the column
+    //    cross-check needs escurel rows, so it stays a compose-time check —
+    //    then walk it for escape hatches like any spec. Everything else is
+    //    the Vega-Lite subset.
     for (name, spec) in &skill.specs {
-        if let Err(e) = check_vega_spec(spec) {
+        let checked = if spec.get("geom").is_some() {
+            peacock_types::StatSpec::parse(spec)
+                .map(drop)
+                .and_then(|()| check_vega_spec(spec))
+        } else {
+            check_vega_spec(spec)
+        };
+        if let Err(e) = checked {
             errors.push(AuthorError::at(
                 spec_line(&fm, text, name),
                 format!("spec `{name}`: {e}"),
