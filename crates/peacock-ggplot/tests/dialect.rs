@@ -4,7 +4,7 @@
 //! where it does not. Same contract as the histogram suite: headless,
 //! in-memory, deterministic.
 
-use peacock_ggplot::render_stat_to_png;
+use peacock_ggplot::{ColumnSchema, render_stat_to_png};
 use serde_json::{Value, json};
 
 /// Two-supplier lead-time rows — the reference use case's shape (numeric
@@ -21,8 +21,21 @@ fn rows() -> Value {
     )
 }
 
+fn schema() -> Vec<ColumnSchema> {
+    vec![
+        ColumnSchema {
+            name: "lead_days".into(),
+            type_name: "DOUBLE".into(),
+        },
+        ColumnSchema {
+            name: "supplier".into(),
+            type_name: "VARCHAR".into(),
+        },
+    ]
+}
+
 fn render(spec: Value) -> Result<Vec<u8>, String> {
-    render_stat_to_png(&spec, &rows(), None, 1.0).map_err(|e| e.to_string())
+    render_stat_to_png(&spec, &rows(), &schema(), None, 1.0).map_err(|e| e.to_string())
 }
 
 fn assert_png(bytes: &[u8]) {

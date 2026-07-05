@@ -7,9 +7,14 @@
 //! aggregation with `:from`/`:to`/`:category` bound as prepared-statement
 //! parameters. `PeacockProcess` (the real `peacock` binary) lands in Phase 7.
 
+mod deliveries;
 mod northwind;
 mod process;
 
+pub use deliveries::{
+    DELIVERIES_TENANT, DeliveriesEscurel, LOGISTICS_GROUP, SD_QUERY_REF, SD_REPORT,
+    skill_report_lead_times,
+};
 pub use northwind::{
     BOOKMARK_SKILL, NW_QUERY_COUNTRY, NW_QUERY_LEADERBOARD, NW_QUERY_LINES, NW_QUERY_PRODUCTS,
     NW_QUERY_REF, NW_REPORT, NW_REPORT_COUNTRY, NW_REPORT_DISCOUNT, NW_REPORT_DISTRIBUTION,

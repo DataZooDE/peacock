@@ -14,6 +14,7 @@ const PROD_CRATES: &[&str] = &[
     "peacock-core",
     "peacock-server",
     "peacock-bin",
+    "peacock-ggplot",
 ];
 
 /// High-signal substrings that would betray a credential/driver/SQL surface.
