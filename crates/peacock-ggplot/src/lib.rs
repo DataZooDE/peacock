@@ -1,5 +1,6 @@
-//! `peacock-ggplot` — the pluggable STATISTICAL render backend (issues #6/#7),
-//! peer to `peacock-rasterizer`: `(spec, rows, theme, size) → PNG`.
+//! `peacock-ggplot` — the pluggable STATISTICAL render backend (issues
+//! #6/#7/#8), peer to `peacock-rasterizer`: `(spec, rows, schema, theme,
+//! size) → PNG`.
 //!
 //! Wraps [`ggplot-rs`](https://github.com/sipemu/ggplot-rs) (Grammar of
 //! Graphics over plotters): pure Rust, headless in-memory PNG, fonts bundled
@@ -11,10 +12,13 @@
 //!
 //! The spec is the typed stat dialect ([`peacock_types::StatSpec`], issue
 //! #7): geoms `histogram | density | boxplot | ecdf`, the `color` /
-//! `facet_wrap` aesthetics, and the `vline` / `p90` annotations. Where
-//! ggplot-rs 0.9.2 cannot honour a declared aesthetic (see the per-geom
-//! notes below) this backend returns a clear structured error — it never
-//! silently drops a declared mark.
+//! `facet_wrap` aesthetics, and the `vline` / `p90` annotations. The rows are
+//! escurel's ACL-checked JSON rows plus their SCHEMA — the [`adapter`] types
+//! every column from the schema's type names (numeric vs categorical vs
+//! temporal), never by sniffing the JSON (issue #8). Where ggplot-rs 0.9.2
+//! cannot honour a declared aesthetic (see the per-geom notes below) this
+//! backend returns a clear structured error — it never silently drops a
+//! declared mark.
 //!
 //! ## Backend support matrix (ggplot-rs 0.9.2)
 //!
@@ -24,16 +28,34 @@
 //! | density   | ✓            | ✓          | ✓ + label   | |
 //! | ecdf      | ✗ error      | ✓          | ✓ + label   | `GeomStep` draws a single path — groups would interleave |
 //! | boxplot   | ✗ error      | ✓          | ✓ (as hline on the value axis, no label) | `GeomBoxplot` draws one fill; text can't anchor on the discrete axis |
+//!
+//! ## Theming (issue #8)
+//!
+//! One brand source: the deployment's `--pk-*` tokens map onto ggplot-rs's
+//! programmatic [`Theme`] — `font` → the (bundled) text face, `bg` →
+//! plot/panel background, `surface` → legend/facet-strip fills, `text` →
+//! body + title, `muted` → axis text + captions, `grid` → gridlines,
+//! `axis` → axis lines/ticks, `border` → the panel border, `brand` → the
+//! single-series primary, `accent` → annotation reference lines, and
+//! `palette` → the categorical multi-series colors. Rendering is
+//! deterministic: fonts are bundled DejaVu (plotters `ab_glyph`, no system
+//! lookup), so same brand ⇒ same bytes.
 
+mod adapter;
+
+pub use adapter::{ColumnKind, ColumnSchema};
+
+use adapter::{NeededColumn, aligned_columns};
 use ggplot_rs::data::Value as GgValue;
 use ggplot_rs::prelude::{
-    Aes, ElementRect, GGPlot, GeomHistogram, GeomHline, GeomVline, Linetype, StatEcdf,
-    theme_minimal,
+    Aes, ElementLine, ElementRect, GGPlot, GeomHistogram, GeomHline, GeomVline, Linetype,
+    RGBAColor, StatEcdf, theme_minimal,
 };
 use ggplot_rs::theme::Theme;
 use peacock_theme::ThemeTokens;
 use peacock_types::{StatAnnotation, StatGeom, StatSpec};
 use serde_json::Value;
+use std::collections::BTreeSet;
 
 /// Statistical-rendering / spec error.
 #[derive(Debug, thiserror::Error)]
@@ -41,7 +63,7 @@ use serde_json::Value;
 pub struct GgplotError(String);
 
 impl GgplotError {
-    fn new(msg: impl Into<String>) -> Self {
+    pub(crate) fn new(msg: impl Into<String>) -> Self {
         GgplotError(msg.into())
     }
 }
@@ -58,14 +80,16 @@ const BASE_W: f32 = 800.0;
 const BASE_H: f32 = 600.0;
 
 /// Render a STATISTICAL spec (the typed dialect, issue #7) to PNG bytes,
-/// headless and in-memory. `rows` is the inline data the composer injected at
-/// the spec's `data.values` — an array of `{column: value}` objects. `theme`
-/// maps the deployment's `--pk-*` tokens onto the chart; `None` renders the
-/// stock look. `scale` ≥ 1.0 multiplies the 800×600 natural size (the same
-/// semantics as `render_vega_to_png`).
+/// headless and in-memory. `rows` is the escurel row array the composer
+/// injected at the spec's `data.values`; `schema` is that RowSet's column
+/// schema (`data.schema`) — the adapter types every column from it (issue
+/// #8). `theme` maps the deployment's `--pk-*` tokens onto the chart; `None`
+/// renders the stock look. `scale` ≥ 1.0 multiplies the 800×600 natural size
+/// (the same semantics as `render_vega_to_png`).
 pub fn render_stat_to_png(
     spec: &Value,
     rows: &Value,
+    schema: &[ColumnSchema],
     theme: Option<&ThemeTokens>,
     scale: f32,
 ) -> Result<Vec<u8>, GgplotError> {
@@ -73,12 +97,15 @@ pub fn render_stat_to_png(
     // spec that never went through compose still fails closed.
     let spec = StatSpec::parse(spec).map_err(|e| GgplotError::new(e.to_string()))?;
     check_backend_support(&spec)?;
+    let resolved = resolve_theme(theme);
 
     let plot = match spec.geom {
-        StatGeom::Boxplot => boxplot_plot(&spec, rows)?,
-        StatGeom::Histogram | StatGeom::Density | StatGeom::Ecdf => distribution_plot(&spec, rows)?,
+        StatGeom::Boxplot => boxplot_plot(&spec, rows, schema, &resolved)?,
+        StatGeom::Histogram | StatGeom::Density | StatGeom::Ecdf => {
+            distribution_plot(&spec, rows, schema, &resolved)?
+        }
     };
-    finish(plot, &spec, theme, scale)
+    finish(plot, &spec, resolved.theme, scale)
 }
 
 /// Reject the aesthetic combinations ggplot-rs 0.9.2 cannot honour — a clear
@@ -113,23 +140,38 @@ fn check_backend_support(spec: &StatSpec) -> Result<(), GgplotError> {
 }
 
 /// Build the plot for the x-numeric distribution geoms (histogram / density /
-/// ecdf): one numeric `x` column, optional `color` series (density only,
-/// enforced above), optional facet column, vline/p90 on the x axis.
-fn distribution_plot(spec: &StatSpec, rows: &Value) -> Result<GGPlot, GgplotError> {
+/// ecdf): one numeric/temporal `x` column, optional `color` series (density
+/// only, enforced above), optional facet column, vline/p90 on the x axis.
+fn distribution_plot(
+    spec: &StatSpec,
+    rows: &Value,
+    schema: &[ColumnSchema],
+    resolved: &ResolvedTheme,
+) -> Result<GGPlot, GgplotError> {
     let geom = spec.geom;
-    let mut columns = vec![NeededColumn::numeric(&spec.x)];
+    let mut columns = vec![NeededColumn::value(&spec.x)];
     if let Some(c) = &spec.color {
-        columns.push(NeededColumn::categorical(c));
+        columns.push(NeededColumn::group(c));
     }
     if let Some(f) = &spec.facet_wrap {
-        columns.push(NeededColumn::categorical(f));
+        columns.push(NeededColumn::group(f));
     }
-    let data = aligned_columns(rows, &columns, geom)?;
+    let data = aligned_columns(rows, schema, &columns, geom)?;
     let x_values: Vec<f64> = data[0]
         .1
         .iter()
         .filter_map(GgValue::as_f64)
         .collect::<Vec<_>>();
+    // The color column's distinct levels (sorted, deterministic) — the
+    // categorical palette maps onto them below.
+    let color_levels: BTreeSet<String> = match spec.color {
+        Some(_) => data[1]
+            .1
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect(),
+        None => BTreeSet::new(),
+    };
 
     let mut aes = Aes::new().x(&spec.x);
     if let Some(c) = &spec.color {
@@ -151,12 +193,27 @@ fn distribution_plot(spec: &StatSpec, rows: &Value) -> Result<GGPlot, GgplotErro
     };
     plot = plot.xlab(&spec.x);
 
+    // The brand's categorical palette drives the multi-series colors, mapped
+    // over the sorted distinct levels (cycling when the palette is shorter).
+    if !color_levels.is_empty() && !resolved.palette.is_empty() {
+        let pairs: Vec<(&str, RGBAColor)> = color_levels
+            .iter()
+            .enumerate()
+            .map(|(i, level)| {
+                let (r, g, b) = resolved.palette[i % resolved.palette.len()];
+                (level.as_str(), RGBAColor::new(r, g, b))
+            })
+            .collect();
+        plot = plot.scale_color_manual(pairs);
+    }
+
     // Annotations live on the x (value) axis; labels sit on the baseline
     // (y = 0 is on-scale for counts, densities and the ecdf alike).
     for ann in &spec.annotations {
         let (at, label, linetype) = annotation_line(ann, &x_values)?;
         plot = plot.geom_vline_with(GeomVline {
             linetype,
+            color: resolved.accent,
             ..GeomVline::new(at)
         });
         if let Some(label) = label {
@@ -169,16 +226,21 @@ fn distribution_plot(spec: &StatSpec, rows: &Value) -> Result<GGPlot, GgplotErro
 /// Build the boxplot: categorical `x`, numeric `y`, optional facet column.
 /// Its numeric axis is y, so vline/p90 draw as HORIZONTAL reference lines at
 /// the value (labels are rejected in [`check_backend_support`]).
-fn boxplot_plot(spec: &StatSpec, rows: &Value) -> Result<GGPlot, GgplotError> {
+fn boxplot_plot(
+    spec: &StatSpec,
+    rows: &Value,
+    schema: &[ColumnSchema],
+    resolved: &ResolvedTheme,
+) -> Result<GGPlot, GgplotError> {
     let y = spec
         .y
         .as_deref()
         .expect("StatSpec::parse guarantees boxplot has a y");
-    let mut columns = vec![NeededColumn::categorical(&spec.x), NeededColumn::numeric(y)];
+    let mut columns = vec![NeededColumn::group(&spec.x), NeededColumn::value(y)];
     if let Some(f) = &spec.facet_wrap {
-        columns.push(NeededColumn::categorical(f));
+        columns.push(NeededColumn::group(f));
     }
-    let data = aligned_columns(rows, &columns, spec.geom)?;
+    let data = aligned_columns(rows, schema, &columns, spec.geom)?;
     let y_values: Vec<f64> = data[1]
         .1
         .iter()
@@ -195,6 +257,7 @@ fn boxplot_plot(spec: &StatSpec, rows: &Value) -> Result<GGPlot, GgplotError> {
         let (at, _label, linetype) = annotation_line(ann, &y_values)?;
         plot = plot.geom_hline_with(GeomHline {
             linetype,
+            color: resolved.accent,
             ..GeomHline::new(at)
         });
     }
@@ -238,7 +301,7 @@ fn quantile(values: &[f64], q: f64) -> Result<f64, GgplotError> {
 fn finish(
     mut plot: GGPlot,
     spec: &StatSpec,
-    theme: Option<&ThemeTokens>,
+    theme: Theme,
     scale: f32,
 ) -> Result<Vec<u8>, GgplotError> {
     if let Some(facet) = &spec.facet_wrap {
@@ -247,7 +310,7 @@ fn finish(
     if let Some(title) = &spec.title {
         plot = plot.title(title);
     }
-    plot = plot.theme(plot_theme(theme));
+    plot = plot.theme(theme);
 
     let scale = scale.max(1.0);
     let w = (BASE_W * scale).ceil() as u32;
@@ -256,104 +319,39 @@ fn finish(
         .map_err(|e| GgplotError::new(format!("{} render: {e}", spec.geom.as_str())))
 }
 
-/// One column to pull out of the inline rows.
-struct NeededColumn<'a> {
-    name: &'a str,
-    numeric: bool,
+/// The brand, resolved for the ggplot backend: the programmatic [`Theme`]
+/// plus the parts the theme struct cannot carry — the categorical palette
+/// (applied per-plot as a manual color scale) and the annotation accent.
+struct ResolvedTheme {
+    theme: Theme,
+    palette: Vec<(u8, u8, u8)>,
+    accent: (u8, u8, u8),
 }
 
-impl<'a> NeededColumn<'a> {
-    fn numeric(name: &'a str) -> Self {
-        NeededColumn {
-            name,
-            numeric: true,
-        }
-    }
-    fn categorical(name: &'a str) -> Self {
-        NeededColumn {
-            name,
-            numeric: false,
-        }
-    }
-}
-
-/// Extract `columns` from the inline rows as row-aligned ggplot columns
-/// (grouping/facet values must stay aligned with the measure). A row whose
-/// FIRST requested column (the geometry's driving column) is `null` is
-/// skipped whole (NA); a non-numeric value in a numeric column is a clear
-/// error — never a silently garbled chart.
-fn aligned_columns(
-    rows: &Value,
-    columns: &[NeededColumn<'_>],
-    geom: StatGeom,
-) -> Result<Vec<(String, Vec<GgValue>)>, GgplotError> {
-    let arr = rows
-        .as_array()
-        .ok_or_else(|| GgplotError::new("rows must be a JSON array of objects"))?;
-    let mut out: Vec<(String, Vec<GgValue>)> = columns
-        .iter()
-        .map(|c| (c.name.to_owned(), Vec::with_capacity(arr.len())))
-        .collect();
-
-    'row: for row in arr {
-        // Drop the row when the driving column is NA — checked first so no
-        // partial row is pushed.
-        if matches!(row.get(columns[0].name), None | Some(Value::Null)) {
-            continue;
-        }
-        let mut converted = Vec::with_capacity(columns.len());
-        for col in columns {
-            let v = row.get(col.name).unwrap_or(&Value::Null);
-            if col.numeric {
-                match v {
-                    Value::Null => continue 'row, // NA in a secondary numeric column
-                    _ => converted.push(GgValue::Float(v.as_f64().ok_or_else(|| {
-                        GgplotError::new(format!(
-                            "column `{}` has a non-numeric value ({v}); geom `{}` needs numbers",
-                            col.name,
-                            geom.as_str()
-                        ))
-                    })?)),
-                }
-            } else {
-                converted.push(categorical(v));
-            }
-        }
-        for (slot, value) in out.iter_mut().zip(converted) {
-            slot.1.push(value);
-        }
-    }
-
-    if out[0].1.is_empty() {
-        return Err(GgplotError::new(format!(
-            "column `{}` has no values to plot",
-            columns[0].name
-        )));
-    }
-    Ok(out)
-}
-
-/// A categorical cell: strings pass through; numbers/bools become their text
-/// form; `null` groups as `"NA"`.
-fn categorical(v: &Value) -> GgValue {
-    match v {
-        Value::String(s) => GgValue::Str(s.clone()),
-        Value::Null => GgValue::Str("NA".to_owned()),
-        other => GgValue::Str(other.to_string()),
-    }
-}
-
-/// Map the deployment's `--pk-*` tokens onto a ggplot-rs theme — minimally:
-/// `bg` → plot/panel background, `text` → text colour, `brand` → the
-/// single-series primary. Tokens that don't parse as `#rrggbb`/`#rgb` hex are
-/// accepted and ignored (theming never fails a render). The full token
-/// mapping (grid, axis, palette, fonts) lands with the theme-parity issue
-/// (peacock#8).
-fn plot_theme(tokens: Option<&ThemeTokens>) -> Theme {
+/// Map the deployment's `--pk-*` tokens onto the backend (issue #8, the full
+/// mapping): `font` → the root text face (ggplot-rs propagates it to every
+/// text element; fonts are bundled, so an unavailable family falls back to
+/// DejaVu deterministically), `bg` → plot + panel background, `surface` →
+/// legend + facet-strip fills, `text` → body + title, `muted` → axis
+/// text / caption / legend text, `grid` → major + minor gridlines, `axis` →
+/// axis lines + ticks, `border` → the panel border, `brand` → the
+/// single-series primary, `accent` → annotation reference lines, `palette` →
+/// the categorical series colors. Tokens that don't parse as
+/// `#rrggbb`/`#rgb` hex are accepted and ignored (theming never fails a
+/// render); `None` is the stock `theme_minimal` look.
+fn resolve_theme(tokens: Option<&ThemeTokens>) -> ResolvedTheme {
     let mut t = theme_minimal();
     let Some(tok) = tokens else {
-        return t;
+        return ResolvedTheme {
+            theme: t,
+            palette: Vec::new(),
+            accent: (0, 0, 0),
+        };
     };
+
+    if let Some(family) = first_font_family(&tok.font) {
+        t.text.family = family;
+    }
     if let Some(bg) = parse_hex(&tok.bg) {
         let panel = ElementRect {
             fill: Some(bg),
@@ -361,19 +359,77 @@ fn plot_theme(tokens: Option<&ThemeTokens>) -> Theme {
             width: 0.0,
             visible: true,
         };
-        t = t
-            .set_plot_background(panel.clone())
-            .set_panel_background(panel);
+        t.plot_background = panel.clone();
+        t.panel_background = panel;
+    }
+    if let Some(surface) = parse_hex(&tok.surface) {
+        let card = ElementRect {
+            fill: Some(surface),
+            color: parse_hex(&tok.border),
+            width: 0.5,
+            visible: true,
+        };
+        t.legend_background = card.clone();
+        t.legend_key = ElementRect {
+            color: None,
+            width: 0.0,
+            ..card.clone()
+        };
+        t.strip_background = card;
     }
     if let Some(text) = parse_hex(&tok.text) {
-        let mut el = t.text.clone();
-        el.color = text;
-        t = t.set_text(el);
+        t.text.color = text;
+        t.title.color = text;
+    }
+    if let Some(muted) = parse_hex(&tok.muted) {
+        t.axis_text_x.color = muted;
+        t.axis_text_y.color = muted;
+        t.caption.color = muted;
+        t.legend_text.color = muted;
+    }
+    if let Some(grid) = parse_hex(&tok.grid) {
+        t.panel_grid_major.color = grid;
+        t.panel_grid_minor.color = grid;
+    }
+    if let Some(axis) = parse_hex(&tok.axis) {
+        let line = ElementLine {
+            color: axis,
+            width: 1.0,
+            visible: true,
+            linetype: Linetype::Solid,
+        };
+        t.axis_line = line.clone();
+        t.axis_ticks = ElementLine { width: 0.5, ..line };
+    }
+    if let Some(border) = parse_hex(&tok.border) {
+        t.panel_border = ElementLine {
+            color: border,
+            width: 1.0,
+            visible: true,
+            linetype: Linetype::Solid,
+        };
     }
     if let Some(brand) = parse_hex(&tok.brand) {
         t = t.with_primary(brand);
     }
-    t
+
+    ResolvedTheme {
+        theme: t,
+        palette: tok.palette.iter().filter_map(|c| parse_hex(c)).collect(),
+        accent: parse_hex(&tok.accent).unwrap_or((0, 0, 0)),
+    }
+}
+
+/// The first family of a CSS `font-family` list, quotes stripped — the name
+/// ggplot-rs registers its bundled face under (`serif`/`mono` keywords pick
+/// the matching bundled DejaVu face; anything else is the sans face).
+fn first_font_family(css: &str) -> Option<String> {
+    let first = css.split(',').next()?.trim().trim_matches(['"', '\'']);
+    if first.is_empty() {
+        None
+    } else {
+        Some(first.to_owned())
+    }
 }
 
 /// Parse `#rrggbb` / `#rgb` into an RGB triple; anything else is `None`.

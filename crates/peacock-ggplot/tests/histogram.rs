@@ -2,7 +2,7 @@
 //! headless and in-memory — no files, no R, no network. The histogram suite;
 //! the rest of the stat-spec dialect (issue #7) is `tests/dialect.rs`.
 
-use peacock_ggplot::render_stat_to_png;
+use peacock_ggplot::{ColumnSchema, render_stat_to_png};
 use peacock_theme::ThemeTokens;
 use serde_json::json;
 
@@ -18,9 +18,22 @@ fn rows() -> serde_json::Value {
     )
 }
 
+fn schema() -> Vec<ColumnSchema> {
+    vec![
+        ColumnSchema {
+            name: "revenue".into(),
+            type_name: "DOUBLE".into(),
+        },
+        ColumnSchema {
+            name: "category".into(),
+            type_name: "VARCHAR".into(),
+        },
+    ]
+}
+
 #[test]
 fn histogram_renders_an_in_memory_png() {
-    let png = render_stat_to_png(&hist_spec(), &rows(), None, 1.0)
+    let png = render_stat_to_png(&hist_spec(), &rows(), &schema(), None, 1.0)
         .expect("histogram renders headless to PNG bytes");
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG magic header");
     assert!(
@@ -33,15 +46,15 @@ fn histogram_renders_an_in_memory_png() {
 #[test]
 fn rendering_is_deterministic() {
     // Statelessness (ADR-P7): identical inputs reproduce the identical image.
-    let a = render_stat_to_png(&hist_spec(), &rows(), None, 1.0).unwrap();
-    let b = render_stat_to_png(&hist_spec(), &rows(), None, 1.0).unwrap();
+    let a = render_stat_to_png(&hist_spec(), &rows(), &schema(), None, 1.0).unwrap();
+    let b = render_stat_to_png(&hist_spec(), &rows(), &schema(), None, 1.0).unwrap();
     assert_eq!(a, b, "two renders of the same inputs are byte-equal");
 }
 
 #[test]
 fn scale_grows_the_image() {
-    let small = render_stat_to_png(&hist_spec(), &rows(), None, 1.0).unwrap();
-    let big = render_stat_to_png(&hist_spec(), &rows(), None, 2.0).unwrap();
+    let small = render_stat_to_png(&hist_spec(), &rows(), &schema(), None, 1.0).unwrap();
+    let big = render_stat_to_png(&hist_spec(), &rows(), &schema(), None, 2.0).unwrap();
     // PNG IHDR width lives at bytes 16..20 (big-endian) right after the magic.
     let w = |png: &[u8]| u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
     assert_eq!(w(&big), 2 * w(&small), "scale multiplies the pixel size");
@@ -49,10 +62,11 @@ fn scale_grows_the_image() {
 
 #[test]
 fn a_theme_changes_the_image() {
-    let stock = render_stat_to_png(&hist_spec(), &rows(), None, 1.0).unwrap();
+    let stock = render_stat_to_png(&hist_spec(), &rows(), &schema(), None, 1.0).unwrap();
     let themed = render_stat_to_png(
         &hist_spec(),
         &rows(),
+        &schema(),
         Some(&ThemeTokens {
             bg: "#10233f".into(),
             brand: "#e2543e".into(),
@@ -73,6 +87,7 @@ fn unknown_geom_errors() {
     let err = render_stat_to_png(
         &json!({ "geom": "pie", "x": "revenue" }),
         &rows(),
+        &schema(),
         None,
         1.0,
     )
@@ -92,6 +107,7 @@ fn non_numeric_x_column_errors_clearly() {
     let err = render_stat_to_png(
         &json!({ "geom": "histogram", "x": "category" }),
         &rows,
+        &schema(),
         None,
         1.0,
     )

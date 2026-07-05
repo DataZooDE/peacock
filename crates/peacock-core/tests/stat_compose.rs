@@ -90,10 +90,20 @@ fn stat_spec_composes_into_stat_specs_with_inline_rows() {
     assert_eq!(art.stat_specs.len(), 1);
     assert!(art.vega_specs.is_empty());
 
-    // Rows are injected inline exactly like a Vega view (parity).
+    // Rows are injected inline exactly like a Vega view (parity) — plus the
+    // RowSet's SCHEMA, so the ggplot backend types columns from escurel's
+    // type names instead of sniffing JSON (issue #8).
     let spec = &art.stat_specs[0];
     assert_eq!(spec["geom"], "histogram");
     assert_eq!(spec["data"]["values"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        spec["data"]["schema"],
+        json!([
+            { "name": "category", "type": "VARCHAR" },
+            { "name": "revenue",  "type": "DOUBLE" }
+        ]),
+        "the composed stat spec carries the escurel column schema"
+    );
 
     // The layout carries the stat component; structuredContent has the rows.
     let comps = art.a2ui["components"].as_array().unwrap();

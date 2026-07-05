@@ -207,19 +207,36 @@ fn attach_png(
     Ok(())
 }
 
-/// Rasterize one STATISTICAL spec through the ggplot backend. The rows come
-/// back out of the spec's injected inline `data.values` — exactly what the
-/// web surfaces see, so PNG/iframe parity holds by construction.
+/// Rasterize one STATISTICAL spec through the ggplot backend. The rows AND
+/// the escurel column schema come back out of the spec's injected inline
+/// `data` — exactly what the web surfaces see, so PNG/iframe parity holds by
+/// construction, and the backend types every column from escurel's reported
+/// type names (issue #8) instead of sniffing the JSON.
 #[cfg(feature = "ggplot")]
 fn render_stat_png(spec: &Value, opts: &RenderOpts, scale: f32) -> Result<Vec<u8>> {
-    let rows = spec
-        .get("data")
+    let data = spec.get("data");
+    let rows = data
         .and_then(|d| d.get("values"))
         .cloned()
         .unwrap_or_else(|| json!([]));
+    let schema: Vec<peacock_ggplot::ColumnSchema> = data
+        .and_then(|d| d.get("schema"))
+        .and_then(Value::as_array)
+        .map(|cols| {
+            cols.iter()
+                .filter_map(|c| {
+                    Some(peacock_ggplot::ColumnSchema {
+                        name: c.get("name")?.as_str()?.to_owned(),
+                        type_name: c.get("type")?.as_str()?.to_owned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(peacock_ggplot::render_stat_to_png(
         spec,
         &rows,
+        &schema,
         opts.theme.as_ref(),
         scale,
     )?)

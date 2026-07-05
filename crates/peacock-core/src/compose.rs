@@ -99,7 +99,7 @@ pub fn compose(
                 if chart.get("geom").is_some() {
                     let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
                     check_stat_spec(&chart, &columns)?;
-                    inject_inline_data(&mut chart, rs.rows.clone());
+                    inject_stat_data(&mut chart, rs);
                     stat_specs.push(chart.clone());
                     components.push(json!({ "kind": "stat", "spec": chart }));
                     continue;
@@ -325,6 +325,24 @@ fn event_json(e: &crate::instance::InstanceEvent) -> Value {
 fn inject_inline_data(spec: &mut Value, rows: Value) {
     if let Value::Object(map) = spec {
         map.insert("data".to_owned(), json!({ "values": rows }));
+    }
+}
+
+/// Inject `data: { values, schema }` into a STATISTICAL spec — the rows plus
+/// escurel's column schema, so the ggplot backend types every column from the
+/// reported type names instead of sniffing the JSON (issue #8). Replaces any
+/// authored `data` (same escape-hatch rule as [`inject_inline_data`]).
+fn inject_stat_data(spec: &mut Value, rs: &RowSet) {
+    if let Value::Object(map) = spec {
+        let schema: Vec<Value> = rs
+            .schema
+            .iter()
+            .map(|c| json!({ "name": c.name, "type": c.type_name }))
+            .collect();
+        map.insert(
+            "data".to_owned(),
+            json!({ "values": rs.rows.clone(), "schema": schema }),
+        );
     }
 }
 
