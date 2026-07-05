@@ -44,38 +44,17 @@ pub fn check_vega_spec(spec: &Value) -> Result<()> {
 /// The statistical geoms the stat-spec dialect declares (issue #6/#7). A
 /// spec is STATISTICAL when its JSON carries a top-level `geom` key
 /// (Vega-Lite uses `mark`, never `geom`).
-pub const STAT_GEOMS: &[&str] = &["histogram", "density", "boxplot", "ecdf"];
+pub const STAT_GEOMS: &[&str] = peacock_types::StatGeom::ALL;
 
-/// Validate a STATISTICAL spec: the same no-escape-hatch walk as
-/// [`check_vega_spec`] plus the dialect's minimal shape — a JSON object, a
-/// known `geom`, and an `x` naming a column of the view's RowSet (`columns`).
-/// Backend-independent: this runs at compose whether or not the `ggplot`
-/// rasterization feature is enabled.
+/// Validate a STATISTICAL spec: the typed dialect parse
+/// ([`peacock_types::StatSpec::parse`] — known geom, known fields, typed
+/// annotations, geometry-conditional shape rules), the RowSet column
+/// cross-check for every aesthetic, and the same no-escape-hatch walk as
+/// [`check_vega_spec`]. Backend-independent: this runs at compose whether or
+/// not the `ggplot` rasterization feature is enabled.
 pub fn check_stat_spec(spec: &Value, columns: &[&str]) -> Result<()> {
-    let Value::Object(map) = spec else {
-        return Err(Error::render(
-            "statistical spec must be a JSON object".to_owned(),
-        ));
-    };
-    let geom = map.get("geom").and_then(Value::as_str).unwrap_or_default();
-    if !STAT_GEOMS.contains(&geom) {
-        return Err(Error::render(format!(
-            "statistical spec names unknown geom `{geom}` (one of {STAT_GEOMS:?})"
-        )));
-    }
-    match map.get("x").and_then(Value::as_str) {
-        Some(x) if columns.contains(&x) => {}
-        Some(x) => {
-            return Err(Error::render(format!(
-                "statistical spec's x `{x}` is not a column of the view's rows ({columns:?})"
-            )));
-        }
-        None => {
-            return Err(Error::render(
-                "statistical spec must name its `x` column".to_owned(),
-            ));
-        }
-    }
+    let parsed = peacock_types::StatSpec::parse(spec)?;
+    parsed.check_columns(columns)?;
     walk(spec)
 }
 

@@ -117,6 +117,80 @@ broken
 }
 
 #[test]
+fn validate_accepts_a_stat_spec_report_skill() {
+    // The stat-spec dialect (issue #7): a report skill declaring a density
+    // chart with a contract vline + p90 marker closed-checks cleanly.
+    let good = r#"---
+type: skill
+id: supplier-lead-times
+render: a2ui
+data:
+  deliveries: "[[query::supplier_deliveries]]"
+views:
+  - { kind: vega, data: deliveries, spec: leadtime_density }
+specs:
+  leadtime_density:
+    geom: density
+    x: lead_days
+    color: supplier
+    facet_wrap: supplier
+    annotations:
+      - { kind: vline, at: 14.0, label: contract }
+      - { kind: p90 }
+---
+Per-supplier lead-time distribution.
+"#;
+    let path = write_temp("stat_ok.md", good);
+    let out = Command::new(binary())
+        .args(["author", "validate"])
+        .arg(&path)
+        .output()
+        .expect("run validate");
+    assert!(
+        out.status.success(),
+        "a valid stat-spec skill must validate; stdout={} stderr={}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+}
+
+#[test]
+fn validate_rejects_a_broken_stat_spec_with_a_useful_message() {
+    // Unknown geom + malformed annotation — validate names both problems.
+    let bad = r#"---
+type: skill
+id: broken-stat
+render: a2ui
+data:
+  deliveries: "[[query::supplier_deliveries]]"
+views:
+  - { kind: vega, data: deliveries, spec: leadtime }
+specs:
+  leadtime:
+    geom: violin
+    x: lead_days
+---
+broken
+"#;
+    let path = write_temp("stat_bad.md", bad);
+    let out = Command::new(binary())
+        .args(["author", "validate"])
+        .arg(&path)
+        .output()
+        .expect("run validate");
+    assert!(!out.status.success(), "unknown geom must fail validation");
+    let msg = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(
+        msg.contains("violin") && msg.contains("histogram"),
+        "error should name the bad geom and the alternatives; got: {msg}"
+    );
+}
+
+#[test]
 fn scaffold_output_validates() {
     let scaffolded = Command::new(binary())
         .args(["author", "scaffold", "my-new-report"])

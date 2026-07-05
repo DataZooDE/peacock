@@ -1,7 +1,6 @@
 //! The ggplot backend contract (issue #6): `(spec, rows, theme, size) → PNG`,
-//! headless and in-memory — no files, no R, no network. Only `histogram`
-//! renders in this issue; the other stat geoms error clearly until the
-//! stat-spec dialect lands (issue #7).
+//! headless and in-memory — no files, no R, no network. The histogram suite;
+//! the rest of the stat-spec dialect (issue #7) is `tests/dialect.rs`.
 
 use peacock_ggplot::render_stat_to_png;
 use peacock_theme::ThemeTokens;
@@ -67,18 +66,6 @@ fn a_theme_changes_the_image() {
         stock, themed,
         "bg/brand/text tokens visibly restyle the chart"
     );
-}
-
-#[test]
-fn not_yet_implemented_geoms_error_clearly() {
-    for geom in ["density", "boxplot", "ecdf"] {
-        let err = render_stat_to_png(&json!({ "geom": geom, "x": "revenue" }), &rows(), None, 1.0)
-            .expect_err("declared-but-unimplemented geoms must not render");
-        assert!(
-            err.to_string().contains("not yet implemented"),
-            "`{geom}` names the gap: {err}"
-        );
-    }
 }
 
 #[test]

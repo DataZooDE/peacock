@@ -10,12 +10,14 @@ mod error;
 mod params;
 mod principal;
 mod selection;
+mod stat;
 
 pub use artifact::{Artifact, StructuredContent};
 pub use error::{Error, Result};
 pub use params::{ParamSchema, ParamSpec, ParamType, ParamValue};
 pub use principal::Principal;
 pub use selection::SharedSelection;
+pub use stat::{StatAnnotation, StatGeom, StatSpec};
 
 /// Crate version, surfaced by `/version`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
