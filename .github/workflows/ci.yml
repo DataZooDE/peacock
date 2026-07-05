@@ -70,11 +70,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: peacock
-          shared-key: peacock-duckdb-dl
+          # v2: the -dl caches are poisoned (they hold the libduckdb-sys
+          # build-script fingerprint but NOT the downloaded .so — every main
+          # run since 2026-07-01 link-fails, #11). Bump to start clean.
+          shared-key: peacock-duckdb-dl-v2
           # The libduckdb-sys build script downloads libduckdb here and bakes
           # its path into the cached link-search output; cache it explicitly.
           cache-directories: peacock/target/duckdb-download
           cache-on-failure: true
+
+      # Safety net for cache restores that lack the downloaded libduckdb
+      # (escurel's proven fix for the same failure): the libduckdb-sys build
+      # script only re-downloads when it actually re-runs, so force that by
+      # cleaning just that crate when the .so is absent from the restore.
+      - name: Ensure libduckdb is present (cache-restore safety)
+        working-directory: peacock
+        run: |
+          if ! ls target/duckdb-download/*/*/libduckdb.so >/dev/null 2>&1; then
+            echo "libduckdb not in restored cache — forcing libduckdb-sys rebuild"
+            cargo clean -p libduckdb-sys || true
+          fi
 
       # The consumer integration tests spawn the real `triton` binary; the
       # harness walks up from triton/crates/triton-tests to target/debug/triton.
