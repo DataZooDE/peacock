@@ -11,7 +11,7 @@ use peacock_types::{Artifact, Error, ParamValue, Result, StructuredContent};
 use serde_json::{Value, json};
 
 use crate::data::RowSet;
-use crate::guardrail::{check_mosaic_source, check_vega_spec};
+use crate::guardrail::{check_mosaic_source, check_stat_spec, check_vega_spec};
 use crate::instance::InstancePage;
 use crate::skill::{Agg, ReportSkill, ViewSpec};
 
@@ -52,6 +52,7 @@ pub fn compose(
 
     let mut components: Vec<Value> = Vec::new();
     let mut vega_specs: Vec<Value> = Vec::new();
+    let mut stat_specs: Vec<Value> = Vec::new();
 
     for view in &skill.views {
         match view {
@@ -87,6 +88,23 @@ pub fn compose(
                 let mut chart = skill.specs.get(chosen).cloned().ok_or_else(|| {
                     Error::render(format!("vega view names unknown spec `{chosen}`"))
                 })?;
+
+                // A top-level `geom` key marks a STATISTICAL spec (issue #6;
+                // Vega-Lite uses `mark`, never `geom`): guardrail it, inject
+                // the rows exactly like a Vega view (structuredContent /
+                // iframe parity), and route it to `stat_specs` — the backend
+                // selector's input. Composed UNCONDITIONALLY: only the PNG
+                // step needs the `ggplot` feature. Stat views always inline
+                // (no Mosaic mode for the statistics layer).
+                if chart.get("geom").is_some() {
+                    let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
+                    check_stat_spec(&chart, &columns)?;
+                    inject_inline_data(&mut chart, rs.rows.clone());
+                    stat_specs.push(chart.clone());
+                    components.push(json!({ "kind": "stat", "spec": chart }));
+                    continue;
+                }
+
                 // Guardrail the AUTHORED spec first — a remote `data.url` or an
                 // expression escape hatch is rejected (ACC-4), not silently
                 // stripped.
@@ -197,6 +215,7 @@ pub fn compose(
     Ok(Artifact {
         a2ui,
         vega_specs,
+        stat_specs,
         structured_content,
         png: None,
     })

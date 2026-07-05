@@ -136,12 +136,16 @@ fn artifact_carries_a2ui_vega_structured_and_optional_png() {
     let art = Artifact {
         a2ui: json!({ "version": "0.9", "components": [] }),
         vega_specs: vec![json!({ "mark": "line" })],
+        stat_specs: Vec::new(),
         structured_content: sc,
         png: None,
     };
     let v = serde_json::to_value(&art).unwrap();
     assert_eq!(v["a2ui"]["version"], "0.9");
     assert_eq!(v["vega_specs"][0]["mark"], "line");
+    // No stat spec authored ⇒ the field is absent from the wire shape, so
+    // pre-existing serialized artifacts stay byte-identical (issue #6).
+    assert!(v.get("stat_specs").is_none());
     // The current resolved params ride structuredContent (FR-X-1).
     assert_eq!(
         v["structured_content"]["current_params"]["category"],

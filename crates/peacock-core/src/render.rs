@@ -189,6 +189,12 @@ fn attach_png(
             None => peacock_rasterizer::render_vega_to_png(spec, scale)?,
         };
         artifact.png = Some(png);
+    } else if let Some(spec) = artifact.stat_specs.first() {
+        // The backend selector (issue #6): a STATISTICAL spec (top-level
+        // `geom`) rasterizes through the pluggable ggplot backend. Only this
+        // PNG step is feature-gated — the spec itself composed above either
+        // way — and with the feature off it is a CLEAR error, never a skip.
+        artifact.png = Some(render_stat_png(spec, opts, scale)?);
     } else if let Some(req) = instance_card_request(skill, pages) {
         let png = match &opts.theme {
             Some(theme) => {
@@ -199,6 +205,36 @@ fn attach_png(
         artifact.png = Some(png);
     }
     Ok(())
+}
+
+/// Rasterize one STATISTICAL spec through the ggplot backend. The rows come
+/// back out of the spec's injected inline `data.values` — exactly what the
+/// web surfaces see, so PNG/iframe parity holds by construction.
+#[cfg(feature = "ggplot")]
+fn render_stat_png(spec: &Value, opts: &RenderOpts, scale: f32) -> Result<Vec<u8>> {
+    let rows = spec
+        .get("data")
+        .and_then(|d| d.get("values"))
+        .cloned()
+        .unwrap_or_else(|| json!([]));
+    Ok(peacock_ggplot::render_stat_to_png(
+        spec,
+        &rows,
+        opts.theme.as_ref(),
+        scale,
+    )?)
+}
+
+/// The feature-off selector arm: a statistical spec was authored but this
+/// build cannot rasterize it — a clear error, never a silent skip. Only
+/// reachable when a report actually carries a `geom:` spec, so the base
+/// Vega-Lite path is untouched (issue #6 acceptance).
+#[cfg(not(feature = "ggplot"))]
+fn render_stat_png(_spec: &Value, _opts: &RenderOpts, _scale: f32) -> Result<Vec<u8>> {
+    Err(peacock_types::Error::render(
+        "statistical spec requires the `ggplot` feature (rebuild with `--features ggplot`)"
+            .to_owned(),
+    ))
 }
 
 /// The `document` pseudo-report: render one instance page (`{skill, id}`)

@@ -5,6 +5,7 @@ members = [
     "crates/peacock-theme",
     "crates/peacock-core",
     "crates/peacock-rasterizer",
+    "crates/peacock-ggplot",
     "crates/peacock-server",
     "crates/peacock-bin",
     "crates/peacock-test-support",
@@ -30,6 +31,7 @@ peacock-types = { path = "crates/peacock-types" }
 peacock-theme = { path = "crates/peacock-theme" }
 peacock-core = { path = "crates/peacock-core" }
 peacock-rasterizer = { path = "crates/peacock-rasterizer" }
+peacock-ggplot = { path = "crates/peacock-ggplot" }
 peacock-server = { path = "crates/peacock-server" }
 
 # Shared third-party (versions aligned with escurel/triton workspaces)
@@ -56,6 +58,11 @@ resvg = "0.47"
 usvg = "0.47"
 tiny-skia = "0.12"
 base64 = "0.22"
+# The statistical backend (issue #6): pure-Rust Grammar of Graphics over
+# plotters, headless in-memory PNG, bundled fonts. `default-features = false`
+# drops the polars input adapter — peacock feeds it plain vectors. Only
+# compiled behind peacock-core's `ggplot` feature.
+ggplot-rs = { version = "0.9.2", default-features = false }
 
 # Cross-repo path dependencies (see CLAUDE.md "Cross-repo dependencies").
 # `query_instance` merged to escurel `main` (PR #205/#206), so these now
