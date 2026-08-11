@@ -50,7 +50,7 @@ impl SavedRef {
 
 /// Persist a parameterized render as an escurel saved instance and return the
 /// [`SavedRef`] that resolves it back. The instance carries `report:
-/// "[[skill::<report_id>]]"` and the absolute `params:` vector; `owner` is
+/// "[[<report_id>]]"` and the absolute `params:` vector; `owner` is
 /// stamped with the caller's `sub` so escurel's owner ACL lets the caller
 /// (and only the caller) read it back. peacock writes nothing locally — it
 /// forwards the page to escurel's `update_page` as the caller (FR-R-2).
@@ -174,16 +174,21 @@ fn bookmark_markdown(
          id: {name}\n\
          visibility: owner\n\
          owner: {owner_sub}\n\
-         report: \"[[skill::{report_id}]]\"\n\
+         report: \"[[{report_id}]]\"\n\
          params: {params_json}\n\
          ---\n\
          # {name}\n\
-         Saved render of [[skill::{report_id}]].\n"
+         Saved render of [[{report_id}]].\n"
     ))
 }
 
-/// Extract the report id from a `report:` wikilink: `[[skill::nw]]` → `nw`,
-/// `[[nw]]` → `nw`, plain `nw` → `nw` (mirrors `skill::query_ref_of`).
+/// Extract the report id from a `report:` wikilink: `[[nw]]` → `nw`,
+/// plain `nw` → `nw`, and the legacy `[[skill::nw]]` → `nw` (mirrors
+/// `skill::query_ref_of`).
+///
+/// The `skill::` arm is kept deliberately: bookmarks written before escurel
+/// began validating link integrity carry that form, and dropping it here
+/// would make every one of them unreadable.
 fn report_ref_of(link: &str) -> String {
     let inner = link.trim().trim_start_matches("[[").trim_end_matches("]]");
     match inner.rsplit_once("::") {

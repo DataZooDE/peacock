@@ -156,6 +156,14 @@ impl InstanceData for crate::data::EscurelData {
             .list_events(ListEventsRequest {
                 instance_page_id: instance_page_id.to_owned(),
                 limit,
+                // escurel#338 added a single-event lookup mode to this request.
+                // `None` is the listing mode, which is what this call has
+                // always meant: the instance's event history, newest first.
+                // Spelled out rather than `..Default::default()` so the next
+                // field escurel adds is a compile error here too — this struct
+                // is a wire contract, and a silent default is how a caller
+                // starts sending something it never decided to send.
+                event_id: None,
             })
             .await
             .map_err(map_err)?;
