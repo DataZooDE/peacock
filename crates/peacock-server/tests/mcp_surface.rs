@@ -545,7 +545,10 @@ async fn emit_document_event_captures_as_the_caller() {
     // The event landed in escurel with the SERVER-substituted templates.
     let client = nw.sales_client().await;
     let inbox = client
-        .list_inbox(escurel_client::ListInboxRequest { limit: 50 })
+        .list_inbox(escurel_client::ListInboxRequest {
+            limit: 50,
+            ..Default::default()
+        })
         .await
         .expect("list inbox");
     let ev = inbox
@@ -609,7 +612,10 @@ async fn emit_document_event_fails_closed() {
     // Nothing was captured by any of the refusals.
     let client = nw.sales_client().await;
     let inbox = client
-        .list_inbox(escurel_client::ListInboxRequest { limit: 50 })
+        .list_inbox(escurel_client::ListInboxRequest {
+            limit: 50,
+            ..Default::default()
+        })
         .await
         .expect("list inbox");
     assert!(

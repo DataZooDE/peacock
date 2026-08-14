@@ -152,34 +152,62 @@ impl InstanceData for crate::data::EscurelData {
         let client = Client::connect(self.endpoint(), token)
             .await
             .map_err(map_err)?;
-        let resp = client
-            .list_events(ListEventsRequest {
-                instance_page_id: instance_page_id.to_owned(),
-                limit,
-                // escurel#338 added a single-event lookup mode to this request.
-                // `None` is the listing mode, which is what this call has
-                // always meant: the instance's event history, newest first.
-                // Spelled out rather than `..Default::default()` so the next
-                // field escurel adds is a compile error here too — this struct
-                // is a wire contract, and a silent default is how a caller
-                // starts sending something it never decided to send.
-                event_id: None,
-            })
-            .await
-            .map_err(map_err)?;
 
-        crate::record(
-            trace,
-            json!({
-                "hop": "peacock→escurel",
-                "method": "list_events",
-                "request": { "instance_page_id": instance_page_id, "limit": limit },
-                "response": { "event_count": resp.events.len() },
-            }),
-        );
+        // Cursor-following drain (escurel v2026.08.14): `next_cursor` —
+        // not a short page — is the only end-of-listing signal (the
+        // per-event ACL filter runs after the server limit and can
+        // legitimately shorten any page). Pages are requested in
+        // `EVENTS_PAGE_LIMIT` steps until `limit` events are collected
+        // or the cursor is exhausted.
+        const EVENTS_PAGE_LIMIT: u32 = 50;
+        let mut events = Vec::new();
+        let mut cursor = String::new();
+        loop {
+            let remaining = limit.saturating_sub(events.len() as u32);
+            if remaining == 0 {
+                break;
+            }
+            let resp = client
+                .list_events(ListEventsRequest {
+                    instance_page_id: instance_page_id.to_owned(),
+                    limit: remaining.min(EVENTS_PAGE_LIMIT),
+                    // escurel#338 added a single-event lookup mode to this
+                    // request. `None` is the listing mode, which is what
+                    // this call has always meant: the instance's event
+                    // history. Spelled out rather than hidden behind a
+                    // spread so the next field escurel adds is a compile
+                    // error here too — this struct is a wire contract.
+                    event_id: None,
+                    cursor: cursor.clone(),
+                })
+                .await
+                .map_err(map_err)?;
 
-        Ok(resp
-            .events
+            crate::record(
+                trace,
+                json!({
+                    "hop": "peacock→escurel",
+                    "method": "list_events",
+                    "request": {
+                        "instance_page_id": instance_page_id,
+                        "limit": remaining.min(EVENTS_PAGE_LIMIT),
+                        "cursor": (!cursor.is_empty()).then_some(cursor.as_str()),
+                    },
+                    "response": {
+                        "event_count": resp.events.len(),
+                        "has_more": resp.next_cursor.is_some(),
+                    },
+                }),
+            );
+
+            events.extend(resp.events);
+            match resp.next_cursor {
+                Some(c) if (events.len() as u32) < limit => cursor = c,
+                _ => break,
+            }
+        }
+
+        Ok(events
             .into_iter()
             .map(|e| InstanceEvent {
                 at: e.at,

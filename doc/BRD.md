@@ -500,9 +500,11 @@ surfaces in v1. (See ADRs in `HLD.md` §9.)
   queried data into the Vega-Lite JSON (required for headless vl-convert
   and FR-V-3), or reference its HTTP server? Settle before FR-V-5 leaves
   "optional". *(Empirically checkable.)*
-- **OQ-2 (escurel `query_instance` shape).** Is the parameterized
-  result-set read a new escurel MCP tool or a promoted `run_stored_query`?
-  Affects the escurel cross-spec dependency (§10).
+- **OQ-2 (escurel `query_instance` shape).** RESOLVED (2026-08-14): the
+  read is `query_instance` (escurel #205/#206); the legacy
+  `run_stored_query` was retired in escurel #399 (the `query_id`
+  argument survives as an alias, and the gateway routes the old tool
+  name for compatibility).
 - **OQ-3 (structuredContent transport on the chat path).** For chat, is
   structuredContent surfaced to a co-present agent, or only the A2UI/PNG?
   Default assumption: A2UI/PNG to humans, structuredContent on the MCP /
