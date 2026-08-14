@@ -206,7 +206,10 @@ async fn triton_dispatches_emit_document_event() {
     // The event is really in escurel, templates substituted server-side.
     let client = nw.sales_client().await;
     let inbox = client
-        .list_inbox(escurel_client::ListInboxRequest { limit: 50 })
+        .list_inbox(escurel_client::ListInboxRequest {
+            limit: 50,
+            ..Default::default()
+        })
         .await
         .expect("list inbox");
     assert!(

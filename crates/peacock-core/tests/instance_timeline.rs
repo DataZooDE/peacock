@@ -171,3 +171,65 @@ async fn empty_history_still_emits_the_component() {
 
     nw.shutdown().await;
 }
+
+/// Cursor-following drain (escurel v2026.08.14): `next_cursor` — not a
+/// short page — is the only end-of-listing signal, so a timeline whose
+/// `limit` exceeds one wire page must follow the cursor. Pinned via the
+/// trace: 120 processed events at an internal page size of 50 means
+/// three `list_events` hops; the single-request implementation made one.
+#[tokio::test]
+async fn timeline_drains_past_one_wire_page() {
+    const BIG_REPORT: &str = "---\ntype: skill\nid: big-timeline\nrender: a2ui\n\
+        description: Full activity history.\n\
+        params:\n  account: { type: string }\n\
+        instances:\n  acct: \"[[account::{account}]]\"\n\
+        views:\n\
+          - { kind: timeline, instance: acct, limit: 120 }\n\
+        ---\n";
+    let mut o = opts();
+    o.extra_skills
+        .push(("big-timeline".to_owned(), BIG_REPORT.to_owned()));
+    let nw = NorthwindEscurel::spawn_with(o).await;
+    let escurel = EscurelData::new(nw.endpoint());
+
+    let client = nw.sales_client().await;
+    for i in 0..120 {
+        account_event(&client, &format!("evt {i:03}"), "body").await;
+    }
+
+    let trace: peacock_core::TraceSink = Default::default();
+    let art = render(
+        "big-timeline",
+        &json!({ "account": "beverages-gmbh" }),
+        &nw.sales_principal(),
+        &escurel,
+        &RenderOpts {
+            trace: Some(trace.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("render");
+
+    let comps = art.a2ui["components"].as_array().unwrap();
+    let events = comps.iter().find(|c| c["kind"] == "timeline").unwrap()["events"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(events.len(), 120, "every event past page one is rendered");
+
+    let hops = trace
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|e| e["method"] == "list_events")
+        .count();
+    assert!(
+        hops >= 3,
+        "a 120-event drain at 50-per-page must follow the cursor across \
+         wire pages; saw {hops} list_events hop(s) — one hop is the old \
+         single-request implementation"
+    );
+
+    nw.shutdown().await;
+}
