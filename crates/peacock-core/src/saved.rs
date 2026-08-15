@@ -75,6 +75,19 @@ pub async fn save_instance(
         .update_page(UpdatePageRequest {
             page_id: saved.page_id(),
             content,
+            // Unguarded, which is what this write has always been. escurel
+            // #409/#413 added optional CAS and provenance fields to the
+            // request, and every one of them is absent-means-unguarded on the
+            // wire — so `..Default::default()` is the previous behaviour
+            // spelled out, not a new choice.
+            //
+            // It is the right choice for a saved-report bookmark specifically:
+            // the page is addressed by a name the caller just chose, a
+            // concurrent write to it is a second caller saving under the same
+            // name, and last-write-wins is the correct resolution for two
+            // people bookmarking the same report. A CAS here would surface a
+            // conflict with nothing for anyone to reconcile.
+            ..Default::default()
         })
         .await
         .map_err(map_err)?;
