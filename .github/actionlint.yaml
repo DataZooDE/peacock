@@ -1,0 +1,7 @@
+# Blacksmith runner labels are not in actionlint's built-in list, so without
+# this every `runs-on:` reports "label is unknown" and real findings drown in
+# the noise. Only the sizes this repo uses are listed, so a typo'd size is
+# still caught rather than silently accepted.
+self-hosted-runner:
+  labels:
+    - blacksmith-4vcpu-ubuntu-2404
