@@ -71,8 +71,19 @@ jobs:
       - name: Install Rust toolchain
         working-directory: peacock
         run: |
+          set -euo pipefail
           rustup show active-toolchain || rustup toolchain install
           rustup component add rustfmt clippy
+          # Make peacock's pin the DEFAULT, not just this directory's override.
+          #
+          # `triton/` has no rust-toolchain.toml, so `cargo build` there resolves
+          # to the runner image's default toolchain — and triton's crates declare
+          # `rust-version = 1.95`. On the old `ubuntu-latest` image that default
+          # happened to be new enough; it is not on every image, and the failure
+          # is a wall of "triton-core@0.0.1 requires rustc 1.95" that names the
+          # dependency rather than the toolchain, so it reads like a triton
+          # problem. Pin it once here and every directory agrees.
+          rustup default "$(rustup show active-toolchain | awk '{print $1}')"
 
       - uses: Swatinem/rust-cache@v2
         with:
