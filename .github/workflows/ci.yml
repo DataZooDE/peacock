@@ -170,68 +170,20 @@ jobs:
         working-directory: peacock
         run: cargo test --workspace --doc
 
-  # `cargo build --release` was the LAST step of the `ci` job — 21m30s of a
-  # 36m31s cold run, sitting behind tests that do not depend on it.
-  #
-  # Splitting it costs nothing in compute, which is the point: it builds the
-  # RELEASE profile, so it shares no compiled artifact with the dev/test build
-  # it used to follow. It was never reusing that work — only waiting for it.
-  # Now the two run concurrently and the release build leaves the critical path.
-  #
-  # Deliberately NOT splitting fmt/clippy/test apart from each other: those DO
-  # share dev-profile artifacts, and peacock's cache is cold more often than not
-  # (runs come in bursts weeks apart, and GitHub evicts after 7 days), so
-  # separating them would pay for the dependency graph twice on most runs.
-  release-build:
-    name: build --release
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
-    steps:
-      - name: Checkout peacock
-        uses: actions/checkout@v4
-        with:
-          path: peacock
-
-      - name: Checkout escurel (path dep)
-        uses: actions/checkout@v4
-        with:
-          repository: DataZooDE/escurel
-          path: escurel
-
-      - name: Checkout triton (path dep)
-        uses: actions/checkout@v4
-        with:
-          repository: DataZooDE/triton
-          path: triton
-
-      - name: Install Rust toolchain
-        working-directory: peacock
-        run: rustup show active-toolchain || rustup toolchain install
-
-      # Its own cache scope: release artifacts share nothing with the dev/test
-      # ones, so pooling them under one key would just make both entries larger
-      # and evict each other sooner.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: peacock
-          shared-key: peacock-release
-          cache-directories: peacock/target/duckdb-download
-          cache-on-failure: true
-
-      # Same guard the `ci` job carries, and for the same reason — omitting it
-      # here failed the link with `rust-lld: error: unable to find library
-      # -lduckdb`. libduckdb-sys bakes the download path into its build-script
-      # output; if the cache restores that output WITHOUT the .so beside it,
-      # the download is considered done and the link then has nothing to find.
-      # Clearing the crate forces the download to happen again.
-      - name: Ensure libduckdb is present (cache-restore safety)
-        working-directory: peacock
-        run: |
-          if ! ls target/duckdb-download/*/*/libduckdb.so >/dev/null 2>&1; then
-            echo "libduckdb not in restored cache — forcing libduckdb-sys rebuild"
-            cargo clean -p libduckdb-sys || true
-          fi
-
+      # Folded back in after the split failed. Splitting it into its own job
+      # was correct in principle — it builds the RELEASE profile and so shares
+      # no artifact with the tests it followed — but the separate job needs its
+      # own rust-cache scope, and in that scope `libduckdb-sys` did not produce
+      # a usable libduckdb for the link:
+      #
+      #   rust-lld: error: unable to find library -lduckdb
+      #
+      # even with the same cache-restore guard this job uses. The download
+      # lives under `target/duckdb-download/` and is shared per cache scope,
+      # so a second scope has to re-establish it and evidently did not. Rather
+      # than keep guessing at that under a red main, it runs here again, in the
+      # scope that works. The concurrency win is worth another attempt later,
+      # with the duckdb behaviour actually understood first.
       - name: cargo build --release
         working-directory: peacock
         run: cargo build --workspace --release
