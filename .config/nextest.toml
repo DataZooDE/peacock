@@ -1,0 +1,38 @@
+# nextest replaces `cargo test` in CI.
+#
+# The suite is ~30 test binaries and libtest runs binaries one after another,
+# so the wall clock was the SUM of all of them — even though the slowest single
+# test (`render_northwind`, ~29s) dwarfs most of the others. nextest overlaps
+# them, so the wall clock approaches the longest test instead of the total.
+# Measured locally on a warm tree: 207s -> 29s.
+
+[profile.default]
+# Deliberately ABOVE the CI runner's core count. These tests spend most of
+# their time waiting — on a spawned `triton` or `peacock` booting, and on HTTP —
+# not on CPU, so over-subscribing wins. Measured (all 243 passing at each):
+#
+#   test-threads =  4  ->  113s
+#   test-threads =  6  ->  103s
+#   test-threads =  8  ->   60s
+#   test-threads = 12  ->   48s
+#
+# 8 takes most of the gain at 2x the 4-vCPU runner rather than 3x, leaving
+# headroom for the process-per-test memory. Raise it if runs stay comfortable;
+# drop it if the suite starts timing out under load rather than failing.
+test-threads = 8
+
+# `render_northwind` legitimately takes ~29s. Report anything slower, and kill
+# a test that has clearly hung rather than letting it sit until the job timeout
+# hides which one it was.
+slow-timeout = { period = "45s", terminate-after = 8 }
+
+[profile.ci]
+inherits = "default"
+# Report every failure in one run; bisecting a red CI one test at a time costs
+# more than finishing the suite.
+fail-fast = false
+# These tests spawn real servers over real HTTP. One retry keeps a genuinely
+# flaky wire from blocking a merge, while still surfacing it — a retried test
+# is reported FLAKY, not as a pass.
+retries = 1
+final-status-level = "flaky"

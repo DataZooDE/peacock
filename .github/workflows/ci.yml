@@ -28,7 +28,14 @@ env:
   # fix). CI-only; committed profiles and local dev builds are untouched.
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
-  CARGO_BUILD_JOBS: "1"
+  # Was "1" — every crate compiled on a single core, which is most of why a
+  # cold run took 36m. That throttle existed for the 2-core / 7 GB
+  # `ubuntu-latest` box, where parallel linking of the libduckdb-heavy test
+  # binaries exhausted memory. The Blacksmith runner below has 16 GB, and the
+  # debuginfo is already dropped above, so the memory pressure that motivated
+  # it is gone. Bounded rather than unset, so a bigger runner does not silently
+  # reintroduce the link spike.
+  CARGO_BUILD_JOBS: "4"
   # The no-mock tests pull libduckdb transitively via escurel-test-support;
   # download the precompiled libduckdb (~2-3 min) instead of compiling from
   # source (~20-30 min), as escurel does. CI-only — local builds are untouched.
@@ -36,9 +43,9 @@ env:
 
 jobs:
   ci:
-    name: fmt + clippy + test + build
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    name: fmt + clippy + test
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
     steps:
       - name: Checkout peacock
         uses: actions/checkout@v4
@@ -64,8 +71,19 @@ jobs:
       - name: Install Rust toolchain
         working-directory: peacock
         run: |
+          set -euo pipefail
           rustup show active-toolchain || rustup toolchain install
           rustup component add rustfmt clippy
+          # Make peacock's pin the DEFAULT, not just this directory's override.
+          #
+          # `triton/` has no rust-toolchain.toml, so `cargo build` there resolves
+          # to the runner image's default toolchain — and triton's crates declare
+          # `rust-version = 1.95`. On the old `ubuntu-latest` image that default
+          # happened to be new enough; it is not on every image, and the failure
+          # is a wall of "triton-core@0.0.1 requires rustc 1.95" that names the
+          # dependency rather than the toolchain, so it reads like a triton
+          # problem. Pin it once here and every directory agrees.
+          rustup default "$(rustup show active-toolchain | awk '{print $1}')"
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -93,9 +111,38 @@ jobs:
 
       # The consumer integration tests spawn the real `triton` binary; the
       # harness walks up from triton/crates/triton-tests to target/debug/triton.
+      #
+      # Cached on the SHA actually checked out. The `Checkout triton` step above
+      # pins no ref, so this tracks triton's default branch — recording the
+      # resolved SHA is what makes the key honest rather than sticky.
+      - name: Resolve the triton SHA
+        id: triton_sha
+        working-directory: triton
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the triton binary
+        id: triton_bin
+        uses: actions/cache@v4
+        with:
+          path: triton/target/debug/triton
+          key: triton-bin-${{ runner.os }}-${{ steps.triton_sha.outputs.sha }}
+
       - name: Build triton binary
+        if: steps.triton_bin.outputs.cache-hit != 'true'
         working-directory: triton
         run: cargo build --bin triton
+
+      # A restored binary MUST be made newer than triton's sources.
+      # `triton-tests` guards against a stale binary with an mtime pre-check and
+      # rebuilds when it trips — shelling `cargo build -p triton-bin` from the
+      # TEST's workspace, which is peacock, where no such package exists. It
+      # then panics with "the `triton` binary looked stale and rebuilding it
+      # failed", pointing nowhere near the cache. actions/cache restores original
+      # mtimes while checkout stamps sources with the current time, so a restored
+      # binary always looks stale. Observed exactly this way while measuring.
+      - name: Freshen the restored triton binary (mtime > sources)
+        if: steps.triton_bin.outputs.cache-hit == 'true'
+        run: touch triton/target/debug/triton
 
       - name: cargo fmt --check
         working-directory: peacock
@@ -105,9 +152,85 @@ jobs:
         working-directory: peacock
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: cargo test
+      - uses: taiki-e/install-action@nextest
+
+      # nextest, not `cargo test`: libtest runs the ~30 test binaries one after
+      # another, so the wall clock was their SUM even though one test
+      # (`render_northwind`) dominates. Measured locally on a warm tree:
+      # 207s -> 29s. Safe because the harnesses bind ephemeral ports; see
+      # .config/nextest.toml for the concurrency cap and timeouts.
+      - name: cargo nextest run
         working-directory: peacock
-        run: cargo test --workspace --all-targets
+        run: cargo nextest run --workspace --profile ci
+
+      # `cargo test --all-targets` never ran doctests, so nextest loses nothing
+      # that was running — but keep them checked explicitly rather than by
+      # accident.
+      - name: cargo test --doc
+        working-directory: peacock
+        run: cargo test --workspace --doc
+
+  # `cargo build --release` was the LAST step of the `ci` job — 21m30s of a
+  # 36m31s cold run, sitting behind tests that do not depend on it.
+  #
+  # Splitting it costs nothing in compute, which is the point: it builds the
+  # RELEASE profile, so it shares no compiled artifact with the dev/test build
+  # it used to follow. It was never reusing that work — only waiting for it.
+  # Now the two run concurrently and the release build leaves the critical path.
+  #
+  # Deliberately NOT splitting fmt/clippy/test apart from each other: those DO
+  # share dev-profile artifacts, and peacock's cache is cold more often than not
+  # (runs come in bursts weeks apart, and GitHub evicts after 7 days), so
+  # separating them would pay for the dependency graph twice on most runs.
+  release-build:
+    name: build --release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - name: Checkout peacock
+        uses: actions/checkout@v4
+        with:
+          path: peacock
+
+      - name: Checkout escurel (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/escurel
+          path: escurel
+
+      - name: Checkout triton (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/triton
+          path: triton
+
+      - name: Install Rust toolchain
+        working-directory: peacock
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # Its own cache scope: release artifacts share nothing with the dev/test
+      # ones, so pooling them under one key would just make both entries larger
+      # and evict each other sooner.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: peacock
+          shared-key: peacock-release
+          cache-directories: peacock/target/duckdb-download
+          cache-on-failure: true
+
+      # Same guard the `ci` job carries, and for the same reason — omitting it
+      # here failed the link with `rust-lld: error: unable to find library
+      # -lduckdb`. libduckdb-sys bakes the download path into its build-script
+      # output; if the cache restores that output WITHOUT the .so beside it,
+      # the download is considered done and the link then has nothing to find.
+      # Clearing the crate forces the download to happen again.
+      - name: Ensure libduckdb is present (cache-restore safety)
+        working-directory: peacock
+        run: |
+          if ! ls target/duckdb-download/*/*/libduckdb.so >/dev/null 2>&1; then
+            echo "libduckdb not in restored cache — forcing libduckdb-sys rebuild"
+            cargo clean -p libduckdb-sys || true
+          fi
 
       - name: cargo build --release
         working-directory: peacock
@@ -115,7 +238,7 @@ jobs:
 
   flutter:
     name: flutter-web build
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
