@@ -97,10 +97,14 @@ jobs:
           cache-directories: peacock/target/duckdb-download
           cache-on-failure: true
 
-      # Safety net for cache restores that lack the downloaded libduckdb
-      # (escurel's proven fix for the same failure): the libduckdb-sys build
-      # script only re-downloads when it actually re-runs, so force that by
-      # cleaning just that crate when the .so is absent from the restore.
+      # Safety net for cache restores that lack the downloaded libduckdb: the
+      # libduckdb-sys build script only re-downloads when it actually re-runs,
+      # so force that by cleaning just that crate when the .so is absent.
+      #
+      # `cargo clean -p <pkg>` is per-PROFILE — bare, it cleans target/debug
+      # only. This job builds dev/test artifacts, so bare is correct HERE. The
+      # `build --release` job below needs `--release`, and the missing flag is
+      # exactly why the earlier attempt at that split failed; see its comment.
       - name: Ensure libduckdb is present (cache-restore safety)
         working-directory: peacock
         run: |
@@ -170,20 +174,88 @@ jobs:
         working-directory: peacock
         run: cargo test --workspace --doc
 
-      # Folded back in after the split failed. Splitting it into its own job
-      # was correct in principle — it builds the RELEASE profile and so shares
-      # no artifact with the tests it followed — but the separate job needs its
-      # own rust-cache scope, and in that scope `libduckdb-sys` did not produce
-      # a usable libduckdb for the link:
-      #
-      #   rust-lld: error: unable to find library -lduckdb
-      #
-      # even with the same cache-restore guard this job uses. The download
-      # lives under `target/duckdb-download/` and is shared per cache scope,
-      # so a second scope has to re-establish it and evidently did not. Rather
-      # than keep guessing at that under a red main, it runs here again, in the
-      # scope that works. The concurrency win is worth another attempt later,
-      # with the duckdb behaviour actually understood first.
+
+  # `cargo build --release` in its OWN job — second attempt.
+  #
+  # #28 split it out and #29 put it back, because the split job link-failed:
+  #
+  #   rust-lld: error: unable to find library -lduckdb
+  #
+  # #29 recorded honestly that "the guard step reported success and the link
+  # still failed, so the guard is not sufficient and my model of why is wrong",
+  # and asked for the duckdb behaviour to be understood before another attempt.
+  # It is now, and the answer is one flag.
+  #
+  # `cargo clean -p <pkg>` cleans the DEV profile only; it needs `--release` to
+  # touch target/release. Measured on escurel's workspace with both profiles
+  # built:
+  #
+  #   cargo clean -p libduckdb-sys            -> 58 files, all target/debug
+  #   cargo clean -p libduckdb-sys --release  -> 48 files, all target/release
+  #
+  # So the guard ran, reported success, and cleaned a profile this job does not
+  # build. The stale release fingerprint survived, libduckdb-sys did not
+  # re-run, it did not re-download, and the link had nothing to find. Nothing
+  # about a "second cache scope" was special — the guard simply never applied.
+  # Fixed and verified in escurel: DataZooDE/escurel#428, whose warm-cache run
+  # shows the cache restored AND the guard firing, then linking clean.
+  #
+  # Verification protocol for this job, because the failure CANNOT appear on a
+  # first run — a cold cache always links: run 1 seeds the cache, then a commit
+  # touching no Cargo.toml/Cargo.lock/rust-toolchain.toml leaves the key intact
+  # so run 2 restores it. Run 2 is the one that proves this. #29 was merged
+  # while its CI was still running; that is the other half of what went wrong.
+  build:
+    name: build --release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - name: Checkout peacock
+        uses: actions/checkout@v4
+        with:
+          path: peacock
+
+      - name: Checkout escurel (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/escurel
+          path: escurel
+
+      - name: Checkout triton (path dep)
+        uses: actions/checkout@v4
+        with:
+          repository: DataZooDE/triton
+          path: triton
+
+      - name: Install Rust toolchain
+        working-directory: peacock
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain || rustup toolchain install
+          rustup default "$(rustup show active-toolchain | awk '{print $1}')"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: peacock
+          # Its own key: this job's target/ holds release artifacts, the `ci`
+          # job's holds dev+test ones. Sharing a key would have them overwrite
+          # each other.
+          shared-key: peacock-release-build
+          cache-directories: peacock/target/duckdb-download
+          cache-on-failure: true
+
+      # THE fix. `--release`, because this job builds the release profile.
+      - name: Ensure libduckdb is present (cache-restore safety)
+        working-directory: peacock
+        run: |
+          if ! ls target/duckdb-download/*/*/libduckdb.so >/dev/null 2>&1; then
+            echo "libduckdb not in restored cache — forcing libduckdb-sys rebuild"
+            cargo clean -p libduckdb-sys --release || true
+          fi
+
+      # No triton BINARY here: only the tests spawn it, and they live in the
+      # `ci` job. This job needs triton checked out for the path dep to
+      # resolve, nothing more.
       - name: cargo build --release
         working-directory: peacock
         run: cargo build --workspace --release
