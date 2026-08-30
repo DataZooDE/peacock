@@ -76,8 +76,29 @@ holds **no database credentials**; escurel is the only data path.
 
 - `cargo fmt --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace --all-targets`
+- `cargo nextest run --workspace` + `cargo test --workspace --doc`
+  (what CI runs; `cargo test --workspace --all-targets` covers the same tests
+  but never ran the doctests, hence the second command)
 - `cargo build --workspace --release`
+
+### Test binaries live in `tests/suite/`
+
+`peacock-core`, `peacock-server` and `peacock-bin` build **one** test binary
+each: their tests sit in `tests/suite/` and are declared as modules from
+`tests/suite/main.rs`. **If you add a test file to one of those crates, put it
+in `tests/suite/` and add its `mod` line** — a file that is not listed there
+is silently never compiled, and nothing warns you.
+
+The layout matters: it must be `tests/suite/main.rs`, not `tests/suite.rs`. A
+test target's root file resolves `mod x;` against its *own* directory.
+
+Why: each of those binaries statically links the escurel gateway and libduckdb
+at ~490-620 MB. Before this, the workspace built 48 test binaries totalling
+15.3 GB; it now builds 27 totalling 0.85 GB. The smaller crates
+(`peacock-rasterizer`, `peacock-ggplot`, `peacock-types`, `peacock-theme`) are
+deliberately untouched — at 7-41 MB a binary the churn and the lost process
+isolation buy nothing. See
+[`doc/notes/discovered/2026-08-29-release-split-and-rsa-keygen.md`](doc/notes/discovered/2026-08-29-release-split-and-rsa-keygen.md).
 
 ## Cross-repo dependencies (coordination)
 

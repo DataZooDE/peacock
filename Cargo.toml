@@ -71,3 +71,56 @@ escurel-client = { path = "../escurel/crates/escurel-client" }
 escurel-types = { path = "../escurel/crates/escurel-types" }
 escurel-test-support = { path = "../escurel/crates/escurel-test-support" }
 triton-tests = { path = "../triton/crates/triton-tests" }
+
+# Disk discipline, adopted from escurel (which reached 845 GB of `target/`
+# before it was noticed). peacock's test binaries statically link libduckdb and
+# the escurel gateway, and under the default `debug = 2` every one of them
+# embeds a full copy of the dependency graph's DWARF. Measured here before this
+# change: **15.3 GB of test binaries, 48 of them, averaging 490 MB** —
+# `peacock-core` alone was 8.8 GB.
+#
+# CI already sets CARGO_PROFILE_DEV_DEBUG=0 / CARGO_PROFILE_TEST_DEBUG=0, so it
+# never paid this; local development paid all of it.
+#
+# `line-tables-only` keeps the file:line mapping that makes a test-failure
+# backtrace useful and drops the variable/type DWARF only an interactive
+# debugger consumes. Dependencies get none at all — their symbol *names* are
+# the symtab, not debuginfo, so backtraces through dep frames still read fine.
+#
+# Need a real debugger? `cargo test --profile dev-debug`, then
+# `cargo clean --profile dev-debug` when you are done.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.dev-debug]
+inherits = "dev"
+debug = 2
+
+[profile.dev-debug.package."*"]
+debug = true
+
+# peacock's no-mock tests spawn a real escurel gateway through
+# `escurel-test-support` (52 call sites via `NorthwindEscurel`), and each spawn
+# mints a 2048-bit RSA keypair for the harness's in-process OIDC issuer. Tests
+# build with the `dev` profile, where dependencies are unoptimized by default,
+# and unoptimized that keygen measures a mean of 4.88s (median 3.01s, max
+# 9.73s) — it was the single largest line item in escurel's own suite.
+#
+# Profile settings only apply from the workspace root being built, so escurel
+# having this fix does nothing for us; peacock needs its own copy.
+#
+# Only these two pure-computation crates are lifted, not the whole dependency
+# graph: they sit well outside the code under test, so optimizing them costs a
+# one-off compile and changes nothing a test can observe. Our own crates stay
+# at opt-level 0 — debuggable backtraces and fast incremental rebuilds are
+# worth more there.
+#
+# See escurel's docs/notes/discovered/2026-08-29-test-suite-cpu-rsa-keygen.md.
+[profile.dev.package.rsa]
+opt-level = 3
+
+[profile.dev.package.num-bigint-dig]
+opt-level = 3
