@@ -83,6 +83,18 @@ averaging 490 MB**, with `peacock-core` alone at 8.8 GB. CI never paid for it
 consolidating `peacock-core` / `peacock-server` / `peacock-bin` into single
 `tests/suite/` targets: **48 binaries -> 27, 15.3 GB -> 0.85 GB**.
 
+## Verifying the split
+
+A cache fix cannot be verified by the run that ships it: the first run after
+any key change is cold, and a cold cache always links. Verification took two
+runs on the same PR branch, the second commit touching no `Cargo.toml`,
+`Cargo.lock` or `rust-toolchain.toml` so the rust-cache key was unchanged:
+
+| run | cache | `build --release` |
+|---|---|---|
+| 1 | cold (`No cache found`, saved 664 MB) | 3m57s |
+| 2 | restored | see the PR |
+
 ## How to recognise these next time
 
 - **`cargo clean -p` takes a profile.** If a cleanup step runs in a job that
