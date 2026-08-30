@@ -76,9 +76,11 @@ holds **no database credentials**; escurel is the only data path.
 
 - `cargo fmt --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo nextest run --workspace` + `cargo test --workspace --doc`
-  (what CI runs; `cargo test --workspace --all-targets` covers the same tests
-  but never ran the doctests, hence the second command)
+- `cargo test --workspace --all-targets` + `cargo test --workspace --doc`
+  (what CI runs; `--all-targets` excludes doctests, hence the second command).
+  `cargo nextest run --workspace` covers the same tests and is faster on a
+  many-core machine, but slower on the 2-core `ubuntu-latest` runner CI uses —
+  see `.config/nextest.toml` for the measurements.
 - `cargo build --workspace --release`
 
 ### Test binaries live in `tests/suite/`
