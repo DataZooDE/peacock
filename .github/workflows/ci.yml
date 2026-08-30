@@ -28,14 +28,16 @@ env:
   # fix). CI-only; committed profiles and local dev builds are untouched.
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
-  # Was "1" — every crate compiled on a single core, which is most of why a
-  # cold run took 36m. That throttle existed for the 2-core / 7 GB
-  # `ubuntu-latest` box, where parallel linking of the libduckdb-heavy test
-  # binaries exhausted memory. The Blacksmith runner below has 16 GB, and the
-  # debuginfo is already dropped above, so the memory pressure that motivated
-  # it is gone. Bounded rather than unset, so a bigger runner does not silently
-  # reintroduce the link spike.
-  CARGO_BUILD_JOBS: "4"
+  # `CARGO_BUILD_JOBS` is NOT set job-wide. It was "1", then "4" when this
+  # workflow moved to a 16 GB Blacksmith runner. peacock is a PUBLIC repo, so
+  # GitHub-hosted minutes are free and Blacksmith was being paid for nothing —
+  # these jobs are back on `ubuntu-latest`, which is 2 cores and 7 GB, where
+  # parallel linking of the libduckdb-heavy test binaries exhausts memory.
+  #
+  # So the cap is back, but only on the steps that actually LINK (see below).
+  # Job-wide was too broad: it also serialised `cargo clippy`, which runs no
+  # linker and so paid the cap without ever having posed the risk. Same shape
+  # escurel settled on.
   # The no-mock tests pull libduckdb transitively via escurel-test-support;
   # download the precompiled libduckdb (~2-3 min) instead of compiling from
   # source (~20-30 min), as escurel does. CI-only — local builds are untouched.
@@ -44,8 +46,9 @@ env:
 jobs:
   ci:
     name: fmt + clippy + test
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    # 2 cores with a serialised link; a cold cache needs real headroom.
+    timeout-minutes: 90
     steps:
       - name: Checkout peacock
         uses: actions/checkout@v4
@@ -156,20 +159,32 @@ jobs:
         working-directory: peacock
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - uses: taiki-e/install-action@nextest
-
-      # nextest, not `cargo test`: libtest runs the ~30 test binaries one after
-      # another, so the wall clock was their SUM even though one test
-      # (`render_northwind`) dominates. Measured locally on a warm tree:
-      # 207s -> 29s. Safe because the harnesses bind ephemeral ports; see
-      # .config/nextest.toml for the concurrency cap and timeouts.
-      - name: cargo nextest run
+      # `cargo test`, not nextest — and that is a measured decision, reversed
+      # from the one this file used to carry.
+      #
+      # nextest schedules across test binaries where libtest runs them one at a
+      # time, which is worth a lot on a many-core machine. But it runs each
+      # test in its OWN process, and this suite's per-process cost is real (the
+      # test issuer's RSA keypair, which no per-process memoisation can
+      # amortise). That trades CPU for scheduling, and a 2-core runner has none
+      # to spare. Pinned to two cores on this workspace, all 243 tests passing:
+      #
+      #   cargo test --workspace --all-targets   47.8s wall, 1m18s CPU
+      #   cargo nextest run (test-threads = 2)   57.1s wall, 1m39s CPU
+      #   cargo nextest run (test-threads = 8)   61.1s wall, 1m50s CPU
+      #
+      # Same result escurel measured independently. `.config/nextest.toml` is
+      # kept for local use, where the cores make nextest the faster option.
+      #
+      # This step builds the test binaries, so it carries the link-memory cap.
+      - name: cargo test
         working-directory: peacock
-        run: cargo nextest run --workspace --profile ci
+        run: cargo test --workspace --all-targets
+        env:
+          CARGO_BUILD_JOBS: "1"
 
-      # `cargo test --all-targets` never ran doctests, so nextest loses nothing
-      # that was running — but keep them checked explicitly rather than by
-      # accident.
+      # `--all-targets` excludes doctests, so they get their own run rather
+      # than being silently skipped.
       - name: cargo test --doc
         working-directory: peacock
         run: cargo test --workspace --doc
@@ -207,8 +222,8 @@ jobs:
   # while its CI was still running; that is the other half of what went wrong.
   build:
     name: build --release
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout peacock
         uses: actions/checkout@v4
@@ -259,13 +274,36 @@ jobs:
       - name: cargo build --release
         working-directory: peacock
         run: cargo build --workspace --release
+        env:
+          # This job links every binary in the workspace; on a 2-core / 7 GB
+          # runner that needs the same cap as the test build.
+          CARGO_BUILD_JOBS: "1"
 
   flutter:
     name: flutter-web build
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
+      # The release `dart2js` compile of a Flutter web app peaks above this
+      # runner's 7 GB and gets OOM-killed early — an abnormal exit with no
+      # diagnostic, which reads like a toolchain bug rather than memory. The
+      # same build is fine on a 16 GB box, which is why this was not needed
+      # while the job ran on Blacksmith. Add swap so dart2js can spill.
+      #
+      # triton hit exactly this and carries the same step; see its ci.yml.
+      - name: Add swap space
+        run: |
+          # The runner ships a small /swapfile — replace it with a bigger one.
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 14G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
