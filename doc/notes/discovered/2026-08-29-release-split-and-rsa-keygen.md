@@ -93,7 +93,22 @@ runs on the same PR branch, the second commit touching no `Cargo.toml`,
 | run | cache | `build --release` |
 |---|---|---|
 | 1 | cold (`No cache found`, saved 664 MB) | 3m57s |
-| 2 | restored | see the PR |
+| 2 | restored, `full match: true` | **55s** |
+
+Run 2 is the one that proves it. Its log shows the cache restored *and* the
+guard firing —
+
+```
+Restored from cache key "v0-rust-peacock-release-build-Linux-x64-…" full match: true.
+libduckdb not in restored cache — forcing libduckdb-sys rebuild
+```
+
+— which is exactly the situation that ended in `unable to find library
+-lduckdb` in #28. With `--release` on the clean, the build script re-runs,
+re-downloads, and the link resolves.
+
+The whole run is now bounded by the Flutter job at 1m13s; `build --release`
+is 55s and the test job 58s, against a 5m22s warm / 36m55s cold baseline.
 
 ## How to recognise these next time
 
