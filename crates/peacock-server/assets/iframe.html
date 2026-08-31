@@ -116,8 +116,23 @@ function mdToHtml(md) {
   return out.join("");
 }
 
-// MCP-Apps host bridge (postMessage). When embedded, the host fulfils these.
+// MCP-Apps host bridge. Three host flavours, feature-detected in priority
+// order (never branch on host NAME — test for the capability, per the
+// OpenAI Apps SDK guidance):
+//   1. An injected `window.openai.*` global (Microsoft 365 Copilot, ChatGPT
+//      and any OpenAI-Apps/MCP-Apps host). This is what makes the widget
+//      interactive in Copilot — no code path existed for it before.
+//   2. peacock's own `mcp:*` postMessage bridge (the Explorer host).
+//   3. same-origin fetch (standalone, no host).
+function mcpAppsHost() {
+  return (typeof window !== "undefined" && window.openai) || null;
+}
 function callServerTool(name, args) {
+  const H = mcpAppsHost();
+  if (H && typeof H.callTool === "function") {
+    // `window.openai.callTool` returns the tool result (Promise or value).
+    return Promise.resolve(H.callTool(name, args));
+  }
   return new Promise((resolve, reject) => {
     if (window.parent === window) {
       // standalone: call peacock directly — render via the HTTP endpoint,
@@ -145,13 +160,25 @@ function callServerTool(name, args) {
   });
 }
 function updateModelContext(record) {
+  const H = mcpAppsHost();
+  if (H && typeof H.setWidgetState === "function") {
+    // MCP Apps has no direct updateModelContext; `setWidgetState` is the
+    // documented equivalent (the compact view-state the model reads back).
+    try { H.setWidgetState(record); } catch (_) {}
+    return;
+  }
   if (window.parent !== window)
     window.parent.postMessage({ type:"mcp:updateModelContext", record }, "*");
 }
 // A `prompt` document action: hand the prepared text to the host, which
-// sends it as a NEW USER TURN in the chat. Standalone (no host) it is a
-// no-op — the button is disabled there.
+// sends it as a NEW USER TURN in the chat — the "follow-up action button".
+// Standalone (no host) it is a no-op — the button is disabled there.
 function sendPrompt(text) {
+  const H = mcpAppsHost();
+  if (H && typeof H.sendFollowUpMessage === "function") {
+    H.sendFollowUpMessage({ prompt: text });
+    return;
+  }
   if (window.parent !== window)
     window.parent.postMessage({ type:"mcp:prompt", text }, "*");
 }

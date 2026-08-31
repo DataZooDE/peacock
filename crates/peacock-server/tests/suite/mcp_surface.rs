@@ -112,6 +112,17 @@ async fn resources_read_serves_the_iframe_runtime() {
         html.contains("updateModelContext"),
         "iframe pushes view state"
     );
+    // The widget must feature-detect an injected MCP-Apps / OpenAI-Apps host
+    // (`window.openai`) so it is interactive in Microsoft 365 Copilot / ChatGPT
+    // — not only via peacock's own `mcp:*` postMessage bridge (the Explorer).
+    assert!(
+        html.contains("window.openai"),
+        "iframe feature-detects the injected MCP-Apps host bridge"
+    );
+    assert!(
+        html.contains("sendFollowUpMessage"),
+        "iframe routes a prompt action through the host's follow-up API"
+    );
     // No flutter_app_url configured → the self-contained iframe, not the shim.
     assert!(
         !html.contains("peacock-app"),
