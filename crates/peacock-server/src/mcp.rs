@@ -122,7 +122,9 @@ async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Valu
         return Ok(get_theme(state, host));
     }
     if name == "emit_document_event" {
-        return emit_document_event(state, &args).await;
+        // Native MCP tools/call: the deployment principal (no per-request
+        // tenant forwarding on this entry point).
+        return emit_document_event(state, &state.principal, &args).await;
     }
     if name != "render_report" {
         return Err(Error::validation(format!("unknown tool `{name}`")));
@@ -158,7 +160,11 @@ async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Valu
 /// document's SKILL page and capture its event in escurel as the caller
 /// (peacock's only write path; the forwarded bearer keeps escurel's ACL in
 /// charge). The core owns the whole validation chain.
-pub(crate) async fn emit_document_event(state: &AppState, args: &Value) -> Result<Value, Error> {
+pub(crate) async fn emit_document_event(
+    state: &AppState,
+    principal: &peacock_types::Principal,
+    args: &Value,
+) -> Result<Value, Error> {
     let field = |k: &str| {
         args.get(k)
             .and_then(Value::as_str)
@@ -166,15 +172,9 @@ pub(crate) async fn emit_document_event(state: &AppState, args: &Value) -> Resul
             .ok_or_else(|| Error::validation(format!("arguments.{k} is required")))
     };
     let (skill, id, action) = (field("skill")?, field("id")?, field("action")?);
-    let event_id = peacock_core::emit_document_event(
-        skill,
-        id,
-        action,
-        &state.principal,
-        &state.escurel,
-        None,
-    )
-    .await?;
+    let event_id =
+        peacock_core::emit_document_event(skill, id, action, principal, &state.escurel, None)
+            .await?;
     Ok(json!({ "ok": true, "event_id": event_id }))
 }
 
