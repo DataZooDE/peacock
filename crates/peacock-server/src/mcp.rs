@@ -213,10 +213,55 @@ pub fn tool_result(report_id: &str, caller_params: &Value, art: &Artifact) -> Va
         "structuredContent": art.structured_content,
         "isError": false,
         "_meta": {
-            "ui": { "resourceUri": resource_uri(report_id, caller_params) },
+            "ui": ui_meta(report_id, caller_params, widget_csp_origin().as_deref()),
             "png_base64": png_b64
         }
     })
+}
+
+/// The `_meta.ui` object for a render tool result (MCP Apps, #659).
+///
+/// Emits ONLY keys in the documented MCP-Apps `_meta.ui` schema
+/// (developers.openai.com/apps-sdk/reference): `resourceUri`, `visibility`,
+/// `prefersBorder`, and — when a widget origin is configured — `csp`.
+///
+/// - `visibility: ["model","app"]` is the default, stated explicitly: the
+///   model may call the tool and the app (host UI) may render its widget.
+/// - `prefersBorder: true`: a report/instance card reads as a bordered card.
+/// - `csp.connectDomains`/`resourceDomains`: the widget iframe (served from
+///   the host's `*.widget-renderer.usercontent.microsoft.com` sandbox, a
+///   DIFFERENT origin) must be allowed to reach OUR origin to load the chart
+///   PNG (`/report/img/…`) and to fetch back. Without this the widget renders
+///   blank/CSP-blocked in the host (#661). Omitted when no origin is
+///   configured, so non-MCP-Apps hosts and local dev are unaffected.
+pub(crate) fn ui_meta(report_id: &str, caller_params: &Value, csp_origin: Option<&str>) -> Value {
+    let mut ui = json!({
+        "resourceUri": resource_uri(report_id, caller_params),
+        "visibility": ["model", "app"],
+        "prefersBorder": true,
+    });
+    if let Some(origin) = csp_origin.map(str::trim).filter(|s| !s.is_empty()) {
+        ui["csp"] = json!({
+            "connectDomains": [origin],
+            "resourceDomains": [origin],
+        });
+    }
+    ui
+}
+
+/// The widget's own origin for CSP (`PEACOCK_WIDGET_CSP_ORIGIN`), read once.
+/// Peacock is embedded in the agent process, so this is set as a pod env from
+/// the agent's public URL; standalone/dev leaves it unset (no `csp` emitted).
+fn widget_csp_origin() -> Option<String> {
+    static ORIGIN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    ORIGIN
+        .get_or_init(|| {
+            std::env::var("PEACOCK_WIDGET_CSP_ORIGIN")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .clone()
 }
 
 /// `ui://peacock/<id>[?k=v&…]` — scalar caller params urlencoded into the
@@ -358,4 +403,68 @@ pub(crate) fn resources_read(state: &AppState, host: &str, params: &Value) -> Re
     Ok(json!({
         "contents": [{ "uri": uri, "mimeType": "text/html", "text": html }]
     }))
+}
+
+#[cfg(test)]
+mod ui_meta_tests {
+    use super::*;
+
+    // The documented MCP-Apps `_meta.ui` schema — the ONLY keys allowed here.
+    // A key outside this set is a conformance bug (some hosts reject unknown
+    // `_meta.ui` keys), so this list is the guard.
+    const ALLOWED_UI_KEYS: &[&str] = &[
+        "resourceUri",
+        "visibility",
+        "prefersBorder",
+        "csp",
+        "domain",
+    ];
+
+    #[test]
+    fn ui_meta_emits_only_supported_keys() {
+        let ui = ui_meta(
+            "northwind-sales",
+            &json!({}),
+            Some("https://agent-lab.data-zoo.de"),
+        );
+        for k in ui.as_object().unwrap().keys() {
+            assert!(
+                ALLOWED_UI_KEYS.contains(&k.as_str()),
+                "unsupported _meta.ui key {k:?} — hosts may reject it"
+            );
+        }
+        assert_eq!(ui["resourceUri"], "ui://peacock/northwind-sales");
+        assert_eq!(ui["visibility"], json!(["model", "app"]));
+        assert_eq!(ui["prefersBorder"], true);
+    }
+
+    #[test]
+    fn csp_names_our_origin_when_configured() {
+        let ui = ui_meta("r", &json!({}), Some("https://agent-lab.data-zoo.de"));
+        // The widget iframe (a foreign widget-renderer origin) must be allowed
+        // to reach OUR origin to load the chart PNG and fetch back (#661).
+        assert_eq!(
+            ui["csp"]["connectDomains"],
+            json!(["https://agent-lab.data-zoo.de"])
+        );
+        assert_eq!(
+            ui["csp"]["resourceDomains"],
+            json!(["https://agent-lab.data-zoo.de"])
+        );
+    }
+
+    #[test]
+    fn no_csp_without_a_configured_origin() {
+        // Standalone / local dev: no origin ⇒ no csp key, and the rest of the
+        // ui block is byte-compatible with pre-#659 consumers plus the two
+        // additive scalar keys.
+        let ui = ui_meta("r", &json!({}), None);
+        assert!(ui.get("csp").is_none());
+        assert!(ui.get("resourceUri").is_some());
+    }
+
+    #[test]
+    fn blank_origin_is_treated_as_unset() {
+        assert!(ui_meta("r", &json!({}), Some("   ")).get("csp").is_none());
+    }
 }
