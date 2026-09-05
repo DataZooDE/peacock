@@ -214,7 +214,12 @@ pub fn tool_result(report_id: &str, caller_params: &Value, art: &Artifact) -> Va
         "isError": false,
         "_meta": {
             "ui": ui_meta(report_id, caller_params, widget_csp_origin().as_deref()),
-            "png_base64": png_b64
+            "png_base64": png_b64,
+            // The composed Vega-Lite chart specs (rows injected inline), so a
+            // caller that can render a NATIVE interactive chart — e.g. Gemini
+            // Enterprise's A2UI `VegaChart` — uses the spec instead of the
+            // rasterized PNG. Empty for report views with no chart (KPI/table).
+            "vega_specs": art.vega_specs,
         }
     })
 }
