@@ -1,0 +1,19 @@
+/* Material Design 3 — Roboto/Google Sans, single-hue blue, elevated cards.
+   Used for the standalone document view (the agent's /docs page) and the
+   Gemini Enterprise side-panel iframe; --pk-brand matches Triton's GE
+   THEME_PRIMARY_COLOR (#1a73e8) so the panel reads as part of the GE card. */
+:root {
+  --pk-font: "Google Sans", "Roboto", system-ui, Arial, sans-serif;
+  --pk-brand: #1a73e8;
+  --pk-accent: #1a73e8;
+  --pk-bg: #ffffff;
+  --pk-surface: #f8f9fa;
+  --pk-text: #1f1f1f;
+  --pk-muted: #5f6368;
+  --pk-border: #dadce0;
+  --pk-grid: #e8eaed;
+  --pk-axis: #9aa0a6;
+  --pk-radius: 16px;
+  --pk-cat-1: #1a73e8; --pk-cat-2: #ea4335; --pk-cat-3: #fbbc04;
+  --pk-cat-4: #34a853; --pk-cat-5: #a142f4; --pk-cat-6: #24c1e0;
+}

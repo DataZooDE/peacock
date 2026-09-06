@@ -5,50 +5,71 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>peacock report</title>
 <style>
-  /* Local look, themed via the injected --pk-* tokens (fallbacks = stock). */
-  :root { --ink:#201f1e; --soft:#605e5c; --line:#e1dfdd; --accent:#0f6cbd; --font:"Segoe UI",system-ui,sans-serif; }
+  /* Local look, themed via the injected --pk-* tokens. Every consumer reads
+     the canonical token (--pk-text/-muted/-border/-brand/-surface/-bg/-radius,
+     the ThemeTokens contract) first, then the Fluent-flavored local as the
+     stock fallback — so a host theme (material / gemini / copilot) drives the
+     whole document, not just accent+font. `--pri` is the one primary colour. */
+  :root {
+    --ink:#201f1e; --soft:#605e5c; --line:#e1dfdd; --accent:#0f6cbd;
+    --font:"Segoe UI",system-ui,sans-serif;
+    --pri: var(--pk-brand, var(--pk-accent, var(--accent)));
+    --txt: var(--pk-text, var(--pk-ink, var(--ink)));
+    --mut: var(--pk-muted, var(--soft));
+    --bdr: var(--pk-border, var(--line));
+    --sfc: var(--pk-surface, #f7f6f5);
+    --rad: var(--pk-radius, 12px);
+  }
   * { box-sizing: border-box; }
-  body { margin:0; font-family:var(--pk-font, var(--font)); color:var(--pk-ink, var(--ink)); background:#fff; }
-  .wrap { padding:14px; }
-  .head { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
-  .head .t { font-weight:600; font-size:15px; }
-  .head .sub { font-size:12px; color:var(--soft); }
-  .kpis { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
-  .kpi { flex:1; min-width:120px; background:#f4f9fe; border:1px solid #e4eef8; border-radius:10px; padding:10px 12px; }
-  .kpi .l { font-size:11px; color:var(--soft); text-transform:uppercase; letter-spacing:.4px; }
-  .kpi .v { font-size:22px; font-weight:700; color:var(--pk-accent, var(--accent)); }
-  img { width:100%; height:auto; border-radius:8px; display:block; }
+  body { margin:0; font-family:var(--pk-font, var(--font)); color:var(--txt); background:var(--pk-bg, #fff); }
+  .wrap { padding:16px; }
+  .head { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  .head .t { font-weight:600; font-size:16px; letter-spacing:.1px; }
+  .head .sub { font-size:12px; color:var(--mut); }
+  .kpis { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .kpi { flex:1; min-width:120px; background:var(--sfc); border:1px solid var(--bdr);
+         border-radius:var(--rad); padding:12px 14px; box-shadow:0 1px 2px rgba(60,64,67,.10); }
+  .kpi .l { font-size:11px; color:var(--mut); text-transform:uppercase; letter-spacing:.4px; }
+  .kpi .v { font-size:22px; font-weight:700; color:var(--pri); }
+  img { width:100%; height:auto; border-radius:var(--rad); display:block; }
   .chips { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
-  .chip { font-size:12px; padding:5px 11px; border-radius:999px; cursor:pointer; border:1px solid var(--line); background:#fff; }
-  .chip.on { background:var(--pk-accent, var(--accent)); color:#fff; border-color:var(--pk-accent, var(--accent)); }
+  .chip { font-size:12px; padding:6px 12px; border-radius:999px; cursor:pointer; border:1px solid var(--bdr); background:var(--pk-bg,#fff); }
+  .chip.on { background:var(--pri); color:#fff; border-color:var(--pri); }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
-  th,td { text-align:left; padding:6px 9px; border-bottom:1px solid var(--line); }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--bdr); }
+  th { color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.3px; font-size:11px; }
   td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
-  .muted { color:var(--soft); font-size:12px; }
-  /* Instance-report components (facts / markdown / timeline). */
-  .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:8px; margin-bottom:12px; }
-  .fact { background:#f7f6f5; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
-  .fact .k { font-size:11px; color:var(--soft); text-transform:uppercase; letter-spacing:.4px; }
+  .muted { color:var(--mut); font-size:12px; }
+  /* Instance-report components (facts / markdown / timeline) — Material cards. */
+  .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
+  .fact { background:var(--sfc); border:1px solid var(--bdr); border-radius:var(--rad);
+          padding:10px 12px; box-shadow:0 1px 2px rgba(60,64,67,.10); }
+  .fact .k { font-size:11px; color:var(--mut); text-transform:uppercase; letter-spacing:.4px; }
   .fact .w { font-size:14px; font-weight:600; overflow-wrap:anywhere; }
-  .md { font-size:13.5px; line-height:1.55; margin-bottom:12px; }
-  .md h3 { margin:.6em 0 .3em; font-size:15px; }
+  .md { font-size:14px; line-height:1.6; margin-bottom:14px; }
+  .md h3 { margin:.8em 0 .3em; font-size:15px; font-weight:600; }
   .md ul { margin:.3em 0 .6em 1.2em; padding:0; }
-  .md .link { color:var(--pk-accent, var(--accent)); font-weight:600; }
+  .md .link { color:var(--pri); font-weight:600; }
   .md .wl { cursor:pointer; text-decoration:underline; text-decoration-style:dotted; }
-  .actions { display:flex; gap:6px; flex-wrap:wrap; margin:10px 0; }
-  .act { font-size:12px; padding:6px 12px; border-radius:999px; cursor:pointer;
-         border:1px solid var(--pk-accent, var(--accent)); background:#fff;
-         color:var(--pk-accent, var(--accent)); font-weight:600; }
+  .actions { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; }
+  .act { font-size:13px; padding:8px 16px; border-radius:999px; cursor:pointer;
+         border:1px solid var(--pri); background:var(--pk-bg,#fff);
+         color:var(--pri); font-weight:600; }
   .act.done { opacity:.65; cursor:default; }
   .act.err { border-color:#a4262c; color:#a4262c; }
-  .tl { border-left:2px solid var(--pk-accent, var(--accent)); margin:4px 0 12px 6px; padding-left:12px; }
-  .tl .ev { margin-bottom:10px; }
+  .tl { border-left:2px solid var(--pri); margin:4px 0 12px 6px; padding-left:14px; }
+  .tl .ev { margin-bottom:12px; }
   .tl .ev .tt { font-weight:600; font-size:13px; }
-  .tl .ev .meta { font-size:11px; color:var(--soft); }
+  .tl .ev .meta { font-size:11px; color:var(--mut); }
   .tl .ev .bd { font-size:12.5px; white-space:pre-wrap; overflow-wrap:anywhere; }
 </style>
 <style id="pk-theme">__THEME_CSS__</style>
 <script type="application/json" id="pk-init">__INITIAL_PARAMS__</script>
+<!-- Optional server-seeded first render (a full render_report tool result).
+     When present, the runtime renders it immediately and skips the opening
+     callServerTool — this is how the standalone /docs page renders with no
+     MCP host to call back to. Empty ("{}"/absent) ⇒ the normal host flow. -->
+<script type="application/json" id="pk-data">__INITIAL_DATA__</script>
 </head>
 <body>
   <div class="wrap" id="app"><div class="muted">Loading report…</div></div>
@@ -319,8 +340,20 @@ async function drill(cat) {
                        salient_summary: `${cat==='ALL'?'All categories':cat}: ${money(total)} (1997)` });
 }
 
-callServerTool("render_report", { report_id: REPORT_ID, params }).then(render)
-  .catch(e => document.getElementById("app").innerHTML = `<div class="muted">Couldn't load: ${esc(e)}</div>`);
+// A server-seeded first render (the /docs page): render it directly and skip
+// the opening host call. Wikilinks/actions still use the bridge and degrade
+// to inert/disabled when there is no host (standalone), exactly as a drill.
+const INITIAL_DATA = (() => {
+  try { return JSON.parse(document.getElementById("pk-data").textContent) || null; }
+  catch (_) { return null; }
+})();
+const hasSeed = INITIAL_DATA && (INITIAL_DATA.structuredContent || INITIAL_DATA._meta);
+if (hasSeed) {
+  render(INITIAL_DATA);
+} else {
+  callServerTool("render_report", { report_id: REPORT_ID, params }).then(render)
+    .catch(e => document.getElementById("app").innerHTML = `<div class="muted">Couldn't load: ${esc(e)}</div>`);
+}
 </script>
 </body>
 </html>

@@ -403,11 +403,67 @@ pub(crate) fn resources_read(state: &AppState, host: &str, params: &Value) -> Re
         None => IFRAME_HTML
             .replace("__REPORT_ID__", report_id)
             .replace("__INITIAL_PARAMS__", &initial_json)
+            // No server seed on this path — the host calls back for the first
+            // render; an empty island keeps the runtime on the normal flow.
+            .replace("__INITIAL_DATA__", "{}")
             .replace("__THEME_CSS__", &theme.css),
     };
     Ok(json!({
         "contents": [{ "uri": uri, "mimeType": "text/html", "text": html }]
     }))
+}
+
+/// Render the `document` pseudo-report for `(skill, id)` as a **fully
+/// server-seeded** standalone HTML page — the same `iframe.html` runtime the
+/// MCP host would load, but with its first render inlined so it needs no
+/// callback bridge. This is what the agent's public `/docs/{token}` page
+/// serves: a themed, self-contained document view (facts + markdown +
+/// timeline) that renders in a plain browser tab or nested in a Gemini
+/// Enterprise `IFrameUrl` side panel.
+///
+/// `principal` is the per-request identity (the embedding agent forwards the
+/// caller's tenant + bearer for #677 isolation); `host` selects the theme
+/// flavor (the agent passes `material`).
+pub(crate) async fn render_document_page(
+    state: &AppState,
+    principal: &peacock_types::Principal,
+    host: &str,
+    skill: &str,
+    id: &str,
+) -> Result<String, Error> {
+    let params = json!({ "skill": skill, "id": id });
+    let theme = state.themes.resolve(&principal.tenant, host);
+    let opts = RenderOpts {
+        png_scale: Some(state.png_scale),
+        theme: Some(theme.tokens.clone()),
+        ..Default::default()
+    };
+    let art = render(
+        peacock_core::DOCUMENT_REPORT_ID,
+        &params,
+        principal,
+        &state.escurel,
+        &opts,
+    )
+    .await?;
+
+    // The seed is a full render_report tool result — the runtime's `render()`
+    // reads `structuredContent` (facts/instances/document) + `_meta.png_base64`
+    // from exactly this shape. `<` escaped so hostile content can't close the
+    // <script> island (same discipline as the params island below).
+    let seed = tool_result(peacock_core::DOCUMENT_REPORT_ID, &params, &art);
+    let seed_json = serde_json::to_string(&seed)
+        .unwrap_or_else(|_| "{}".into())
+        .replace('<', "\\u003c");
+    let initial_json = serde_json::to_string(&params)
+        .unwrap_or_else(|_| "{}".into())
+        .replace('<', "\\u003c");
+
+    Ok(IFRAME_HTML
+        .replace("__REPORT_ID__", peacock_core::DOCUMENT_REPORT_ID)
+        .replace("__INITIAL_PARAMS__", &initial_json)
+        .replace("__INITIAL_DATA__", &seed_json)
+        .replace("__THEME_CSS__", &theme.css))
 }
 
 #[cfg(test)]

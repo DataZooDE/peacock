@@ -162,11 +162,57 @@ async fn tool_call(
         // PNG and return it base64-encoded — the capability Triton's chat
         // surface delegates to via TRITON_RASTERIZE_UPSTREAM.
         "render_a2ui_to_png" => render_a2ui_to_png(state, args),
+        // The `document` pseudo-report for `{skill, id}` as a fully
+        // server-seeded, self-contained HTML page — what the agent's public
+        // `/docs/{token}` route serves (and Gemini Enterprise nests in an
+        // IFrameUrl side panel). Host header selects the theme flavor
+        // (the agent passes `material`); principal isolates per tenant (#677).
+        "render_document_html" => render_document_html(state, principal, host, args).await,
         other => (
             StatusCode::NOT_FOUND,
             Json(json!({ "error": format!("unknown tool `{other}`") })),
         )
             .into_response(),
+    }
+}
+
+/// `render_document_html` → the seeded standalone document page as
+/// `{ "html": <string> }`, or a mapped error status (auth → 401, validation
+/// → 400, not-found → 404, everything else → 502) so the agent's `/docs`
+/// route can translate peacock's outcome into an HTTP response.
+async fn render_document_html(
+    state: &AppState,
+    principal: &peacock_types::Principal,
+    host: &str,
+    args: Value,
+) -> Response {
+    let field = |k: &str| {
+        args.get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    let (Some(skill), Some(id)) = (field("skill"), field("id")) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "arguments.skill and arguments.id are required" })),
+        )
+            .into_response();
+    };
+    match crate::mcp::render_document_page(state, principal, host, skill, id).await {
+        Ok(html) => Json(json!({ "html": html })).into_response(),
+        Err(e) => {
+            let status = match e {
+                peacock_types::Error::Auth(_) => StatusCode::UNAUTHORIZED,
+                peacock_types::Error::Validation(_) => StatusCode::NOT_FOUND,
+                _ => StatusCode::BAD_GATEWAY,
+            };
+            (
+                status,
+                Json(json!({ "error": e.kind(), "message": e.to_string() })),
+            )
+                .into_response()
+        }
     }
 }
 

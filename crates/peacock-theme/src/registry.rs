@@ -14,8 +14,9 @@ pub struct ThemeRegistry {
 }
 
 impl ThemeRegistry {
-    /// The built-in registry: host flavors (`copilot`, `whatsapp`, `gemini`)
-    /// and demo brands (`company-a`, `company-b`, plus the empty `default`).
+    /// The built-in registry: host flavors (`copilot`, `whatsapp`, `gemini`,
+    /// `material`) and demo brands (`company-a`, `company-b`, plus the empty
+    /// `default`).
     pub fn builtin() -> Self {
         let mut hosts = BTreeMap::new();
         hosts.insert(
@@ -29,6 +30,10 @@ impl ThemeRegistry {
         hosts.insert(
             "gemini".into(),
             include_str!("../assets/hosts/gemini.css").to_string(),
+        );
+        hosts.insert(
+            "material".into(),
+            include_str!("../assets/hosts/material.css").to_string(),
         );
 
         let mut brands = BTreeMap::new();

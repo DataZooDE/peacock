@@ -538,6 +538,49 @@ async fn document_render_carries_the_action_contract_and_the_uri_round_trips() {
 }
 
 #[tokio::test]
+async fn render_document_html_serves_a_seeded_material_page() {
+    // The `/docs` route's upstream: `X-Triton-Tool: render_document_html`
+    // returns a self-contained, THEMED, SERVER-SEEDED document page — no
+    // callback bridge needed, so it renders in a plain browser tab.
+    let (nw, base) = start_with_actions().await;
+    let http = reqwest::Client::new();
+    let r = http
+        .post(&base)
+        .header("x-triton-tool", "render_document_html")
+        // Host header selects the theme flavor (the agent passes `material`).
+        .header("host", "material")
+        .json(&json!({ "skill": "account", "id": "beverages-gmbh" }))
+        .send()
+        .await
+        .expect("upstream request")
+        .json::<Value>()
+        .await
+        .expect("json");
+    let html = r["html"].as_str().expect("html field");
+
+    // The seed island carries the rendered document (facts island populated),
+    // so the runtime renders immediately instead of showing the loader.
+    assert!(
+        html.contains("id=\"pk-data\""),
+        "the server-seed island is present"
+    );
+    assert!(
+        html.contains("\"skill\":\"account\"") && html.contains("\"id\":\"beverages-gmbh\""),
+        "the document identity is seeded into the page"
+    );
+    // Material theme drives the page (the host flavor's brand colour).
+    assert!(
+        html.contains("#1a73e8"),
+        "the material theme CSS is injected"
+    );
+    // The report id is the document pseudo-report (the runtime renders facts,
+    // not a chart-first report).
+    assert!(html.contains("const REPORT_ID = \"document\""));
+
+    nw.shutdown().await;
+}
+
+#[tokio::test]
 async fn emit_document_event_captures_as_the_caller() {
     let (nw, base) = start_with_actions().await;
 
