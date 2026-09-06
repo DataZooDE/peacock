@@ -81,6 +81,21 @@ fn agent_authored_brand_can_be_registered() {
 }
 
 #[test]
+fn material_host_flavor_is_google_blue() {
+    // The `material` flavor styles the standalone document view (the agent's
+    // /docs page + the Gemini Enterprise side panel). Its brand deliberately
+    // equals Triton's GE THEME_PRIMARY_COLOR so the panel matches the card.
+    let reg = ThemeRegistry::builtin();
+    let t = reg.resolve("default", "material");
+    assert_eq!(t.tokens.brand, "#1a73e8");
+    assert_eq!(t.tokens.accent, "#1a73e8");
+    assert!(t.css.contains("--pk-brand"));
+    // A tenant brand still composes on top of the Material host look.
+    let branded = reg.resolve("company-a", "material");
+    assert_eq!(branded.tokens.brand, "#6b3fa0");
+}
+
+#[test]
 fn unknown_names_fall_back_to_defaults() {
     let reg = ThemeRegistry::builtin();
     let t = reg.resolve("nope", "nope");
