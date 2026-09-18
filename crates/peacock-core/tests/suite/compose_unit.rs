@@ -438,8 +438,8 @@ fn tagged_body_renders_views_inline_with_narrative_and_followups() {
     let kinds: Vec<&str> = comps.iter().map(|c| c["kind"].as_str().unwrap()).collect();
     assert_eq!(
         kinds,
-        vec!["text", "vega", "text", "followups"],
-        "inline document order: narrative, chart, narrative, buttons"
+        vec!["text", "vega", "text", "button"],
+        "inline document order: narrative, chart, narrative, one re-ask button"
     );
     assert_eq!(
         comps.len(),
@@ -450,8 +450,12 @@ fn tagged_body_renders_views_inline_with_narrative_and_followups() {
         comps[1]["spec"]["data"]["values"].is_array(),
         "the chart carries the escurel rows inline"
     );
-    assert_eq!(comps[3]["buttons"][0]["label"], "Drill EMEA");
-    assert_eq!(comps[3]["buttons"][0]["question"], "Show EMEA only");
+    // The follow-up renders in the exact re-ask button shape the chat surfaces
+    // already map (kind=button, tool=assistant, args.question) — no per-surface
+    // change needed for GE / Teams / Chat / Copilot.
+    assert_eq!(comps[3]["label"], "Drill EMEA");
+    assert_eq!(comps[3]["tool"], "assistant");
+    assert_eq!(comps[3]["args"]["question"], "Show EMEA only");
 }
 
 #[test]

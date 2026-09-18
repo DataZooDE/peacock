@@ -74,7 +74,7 @@ pub fn compose(
                 }
                 crate::body_tags::BodySegment::Tag(tag) => {
                     if tag.name == "followups" {
-                        components.push(followups_component(&skill.followups));
+                        components.extend(followups_buttons(&skill.followups));
                     } else {
                         let view = tag_to_view(tag).ok_or_else(|| {
                             Error::render(format!(
@@ -312,14 +312,23 @@ fn parse_agg(s: Option<&str>) -> crate::skill::Agg {
         .unwrap_or(crate::skill::Agg::Sum)
 }
 
-/// The `{{followups}}` component: the follow-up buttons declared on the skill.
-/// Empty ⇒ an empty button list (renderers skip it), never an error.
-fn followups_component(followups: &[crate::skill::FollowupButton]) -> Value {
-    let buttons: Vec<Value> = followups
+/// The `{{followups}}` buttons: one re-ask `button` component per declared
+/// follow-up, in the EXACT shape the chat surfaces already render (a
+/// `render_report`-less button whose `args.question` re-asks the agent —
+/// agent-core `AssistantTool`), so GE / Teams / Google Chat / Copilot render
+/// them with no per-surface change. Empty ⇒ no components.
+fn followups_buttons(followups: &[crate::skill::FollowupButton]) -> Vec<Value> {
+    followups
         .iter()
-        .map(|f| json!({ "label": f.label, "question": f.question }))
-        .collect();
-    json!({ "kind": "followups", "buttons": buttons })
+        .map(|f| {
+            json!({
+                "kind": "button",
+                "label": f.label,
+                "tool": "assistant",
+                "args": { "question": f.question },
+            })
+        })
+        .collect()
 }
 
 /// Count the distinct colour-series in a view's rows, per the named spec's
