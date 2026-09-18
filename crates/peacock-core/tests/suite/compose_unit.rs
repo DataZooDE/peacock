@@ -459,6 +459,112 @@ fn tagged_body_renders_views_inline_with_narrative_and_followups() {
 }
 
 #[test]
+fn evolve_run_report_renders_a_rich_page() {
+    // End-to-end proof that the seeded `evolve-run-report` (the deploy artifact)
+    // renders a rich per-run page from a single `evolve_experiment` instance:
+    // a summary/frontmatter KPI block, the run body (narrative + winning
+    // program), and the three type-steered follow-up buttons with the run id
+    // substituted in. This is the A2UI GE consumes directly and triton maps to
+    // Teams/Chat/Copilot — the follow-ups reuse the existing re-ask button shape.
+    let fm = json!({
+        "type": "skill",
+        "id": "evolve-run-report",
+        "render": "a2ui",
+        "description": "A config-search run's rich result page.",
+        "params": { "experiment": { "type": "string" } },
+        "instances": { "exp": "[[evolve_experiment::{experiment}]]" },
+        "followups": [
+            {"label": "Promote the winner",
+             "question": "Promote the winning program for optimization run {experiment}"},
+            {"label": "Run 10 more generations",
+             "question": "Continue optimization run {experiment} for 10 more generations"},
+            {"label": "Show the events",
+             "question": "Show the recent events for optimization run {experiment}"},
+        ],
+    });
+    let body = "## Optimization result\n\n\
+                {{summary: exp keys=status,best_score,generation,candidates_evaluated,usd label=Run}}\n\n\
+                {{markdown: exp}}\n\n\
+                ### What next\n\n{{followups}}\n";
+    let skill = ReportSkill::from_frontmatter("evolve-run-report", &fm, body).unwrap();
+
+    let exp = peacock_core::InstancePage {
+        page_id: "markdown/instances/evolve_experiment/chat-opt-1789627516557.md".into(),
+        skill: "evolve_experiment".into(),
+        id: "chat-opt-1789627516557".into(),
+        frontmatter: json!({
+            "id": "chat-opt-1789627516557", "status": "succeeded",
+            "best_score": -2.4, "best_program_id": 7, "generation": 12,
+            "candidates_evaluated": 240, "usd": 0.031,
+        }),
+        body: "# Optimization run chat-opt-1789627516557\n\n\
+               Found a packing that fits every item into 12 bins (best score -2.4).\n\n\
+               ## Winning program\n\n```sql\nSELECT bin, item FROM plan;\n```\n"
+            .into(),
+        events: Vec::new(),
+    };
+    let mut pages = BTreeMap::new();
+    pages.insert("exp".to_string(), exp);
+    let params: BTreeMap<String, ParamValue> = [(
+        "experiment".to_string(),
+        ParamValue(json!("chat-opt-1789627516557")),
+    )]
+    .into();
+
+    let art = compose(
+        &skill,
+        &params,
+        &json!({ "experiment": "chat-opt-1789627516557" }),
+        &BTreeMap::new(),
+        &pages,
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+
+    let comps = art.a2ui["components"].as_array().unwrap();
+    // Print the rendered A2UI as concrete evidence of what each surface receives.
+    println!(
+        "evolve-run-report A2UI:\n{}",
+        serde_json::to_string_pretty(&art.a2ui["components"]).unwrap()
+    );
+
+    let kinds: Vec<&str> = comps.iter().map(|c| c["kind"].as_str().unwrap()).collect();
+    // Header text, KPI/frontmatter summary, the run body (winner), "What next"
+    // text, then exactly three re-ask buttons.
+    assert!(
+        kinds.contains(&"frontmatter"),
+        "summary KPIs present: {kinds:?}"
+    );
+    assert!(
+        kinds.contains(&"markdown"),
+        "the run body (winner) present: {kinds:?}"
+    );
+    let buttons: Vec<&Value> = comps.iter().filter(|c| c["kind"] == "button").collect();
+    assert_eq!(buttons.len(), 3, "three steered follow-ups: {kinds:?}");
+    // Each follow-up is a re-ask carrying the concrete run id.
+    for b in &buttons {
+        assert_eq!(b["tool"], "assistant");
+        assert!(
+            b["args"]["question"]
+                .as_str()
+                .unwrap()
+                .contains("chat-opt-1789627516557"),
+            "follow-up re-ask carries the run id: {b}"
+        );
+    }
+    // The summary block carries the run's KPIs from the instance frontmatter.
+    let facts = comps.iter().find(|c| c["kind"] == "frontmatter").unwrap();
+    let keys: Vec<&str> = facts["facts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["key"].as_str().unwrap())
+        .collect();
+    assert!(keys.contains(&"best_score") && keys.contains(&"status"));
+}
+
+#[test]
 fn followup_questions_substitute_bound_params() {
     // A re-ask click is a fresh turn with no page context, so `{param}` in a
     // follow-up question is filled from the absolute param vector — the button
