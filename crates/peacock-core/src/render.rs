@@ -364,6 +364,7 @@ where
         narrative: String::new(),
         viewer: None,
         actions: Vec::new(),
+        followups: Vec::new(),
     };
 
     let absolute: BTreeMap<String, peacock_types::ParamValue> = [

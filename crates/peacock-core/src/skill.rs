@@ -209,6 +209,18 @@ pub struct ReportSkill {
     /// `actions:` — the document affordances an instance skill page
     /// declares. Empty on report pages.
     pub actions: Vec<ActionSpec>,
+    /// `followups:` — the follow-up buttons a `{{followups}}` body tag renders
+    /// on the page. For a per-run result page the agent bakes the LLM-selected
+    /// entries (steered by the instance's type skill) into the page it authors.
+    /// Empty ⇒ `{{followups}}` renders nothing.
+    pub followups: Vec<FollowupButton>,
+}
+
+/// One follow-up button: a short label plus the full question a tap re-asks.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FollowupButton {
+    pub label: String,
+    pub question: String,
 }
 
 impl ReportSkill {
@@ -258,6 +270,7 @@ impl ReportSkill {
         let views = parse_views(id, fm)?;
         let viewer = parse_viewer(id, fm)?;
         let actions = parse_actions(id, fm)?;
+        let followups = parse_followups(id, fm)?;
 
         Ok(ReportSkill {
             id: id.to_owned(),
@@ -269,8 +282,40 @@ impl ReportSkill {
             narrative: body.to_owned(),
             viewer,
             actions,
+            followups,
         })
     }
+}
+
+/// Parse the `followups:` list — each entry `{ label, question }`. Absent ⇒
+/// empty. A malformed entry (missing label/question) is a hard error, not a
+/// silently dropped button, so an authoring mistake surfaces at validate time.
+fn parse_followups(id: &str, fm: &Value) -> Result<Vec<FollowupButton>> {
+    let Some(v) = fm.get("followups") else {
+        return Ok(Vec::new());
+    };
+    let arr = v
+        .as_array()
+        .ok_or_else(|| Error::render(format!("report `{id}`: `followups:` must be a list")))?;
+    let mut out = Vec::with_capacity(arr.len());
+    for (i, e) in arr.iter().enumerate() {
+        let label = e.get("label").and_then(Value::as_str).unwrap_or("").trim();
+        let question = e
+            .get("question")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if label.is_empty() || question.is_empty() {
+            return Err(Error::render(format!(
+                "report `{id}`: followups[{i}] needs a non-empty `label` and `question`"
+            )));
+        }
+        out.push(FollowupButton {
+            label: label.to_owned(),
+            question: question.to_owned(),
+        });
+    }
+    Ok(out)
 }
 
 /// Parse the `viewer:` declaration (see [`ViewerSpec`]). `document` may not
