@@ -74,7 +74,7 @@ pub fn compose(
                 }
                 crate::body_tags::BodySegment::Tag(tag) => {
                     if tag.name == "followups" {
-                        components.extend(followups_buttons(&skill.followups));
+                        components.extend(followups_buttons(&skill.followups, bound));
                     } else {
                         let view = tag_to_view(tag).ok_or_else(|| {
                             Error::render(format!(
@@ -317,18 +317,62 @@ fn parse_agg(s: Option<&str>) -> crate::skill::Agg {
 /// `render_report`-less button whose `args.question` re-asks the agent —
 /// agent-core `AssistantTool`), so GE / Teams / Google Chat / Copilot render
 /// them with no per-surface change. Empty ⇒ no components.
-fn followups_buttons(followups: &[crate::skill::FollowupButton]) -> Vec<Value> {
+///
+/// A re-ask click is a FRESH agent turn with none of this page's conversational
+/// context, so the follow-up question must name what it refers to. `{param}`
+/// placeholders in the question are substituted from the render's absolute param
+/// vector (`bound`) — e.g. `question: "Promote the winner of run {experiment}"`
+/// renders with the concrete run id, so the re-ask stands on its own.
+fn followups_buttons(followups: &[crate::skill::FollowupButton], bound: &Value) -> Vec<Value> {
     followups
         .iter()
         .map(|f| {
             json!({
                 "kind": "button",
-                "label": f.label,
+                "label": subst_params(&f.label, bound),
                 "tool": "assistant",
-                "args": { "question": f.question },
+                "args": { "question": subst_params(&f.question, bound) },
             })
         })
         .collect()
+}
+
+/// Substitute `{key}` placeholders in `s` from the `bound` param object. An
+/// unknown key is left verbatim (an author's literal brace survives); scalar
+/// param values are rendered without JSON quotes.
+fn subst_params(s: &str, bound: &Value) -> String {
+    let Some(obj) = bound.as_object() else {
+        return s.to_string();
+    };
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after.find('}') {
+            Some(close) => {
+                let key = &after[..close];
+                match obj.get(key) {
+                    Some(Value::String(v)) => out.push_str(v),
+                    Some(v) => out.push_str(&v.to_string()),
+                    None => {
+                        // Not a known param — keep the literal `{key}`.
+                        out.push('{');
+                        out.push_str(key);
+                        out.push('}');
+                    }
+                }
+                rest = &after[close + 1..];
+            }
+            None => {
+                // Unterminated `{` — the remainder is literal.
+                out.push_str(&rest[open..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Count the distinct colour-series in a view's rows, per the named spec's

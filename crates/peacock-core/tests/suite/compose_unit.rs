@@ -459,6 +459,38 @@ fn tagged_body_renders_views_inline_with_narrative_and_followups() {
 }
 
 #[test]
+fn followup_questions_substitute_bound_params() {
+    // A re-ask click is a fresh turn with no page context, so `{param}` in a
+    // follow-up question is filled from the absolute param vector — the button
+    // carries the concrete id and stands on its own.
+    let mut skill = report(json!({ "rev_line": rev_line_spec() }), vec![]);
+    skill.narrative = "Result.\n\n{{followups}}".into();
+    skill.followups = vec![peacock_core::skill::FollowupButton {
+        label: "Promote run {experiment}".into(),
+        question: "Promote the winner of run {experiment}".into(),
+    }];
+
+    let art = compose(
+        &skill,
+        &params(),
+        &json!({ "experiment": "chat-opt-42" }),
+        &rows_map(),
+        &BTreeMap::new(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+
+    let comps = art.a2ui["components"].as_array().unwrap();
+    let button = comps.iter().find(|c| c["kind"] == "button").unwrap();
+    assert_eq!(button["label"], "Promote run chat-opt-42");
+    assert_eq!(
+        button["args"]["question"],
+        "Promote the winner of run chat-opt-42"
+    );
+}
+
+#[test]
 fn untagged_body_keeps_classic_layout() {
     // Regression: a body with no tags still renders frontmatter views then the
     // narrative blob (byte-for-byte the pre-tags behaviour).
