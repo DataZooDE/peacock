@@ -247,8 +247,64 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
         }
     }
 
+    // Body `{{tags}}` (the "markdown + tags" layout) reference the same aliases
+    // as `views:` — collect and validate them too, so a report that places its
+    // views inline instead of in a `views:` list is not seen as unreferenced.
+    let mut body_data_refs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut body_instance_refs: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    for seg in crate::body_tags::parse_body(&skill.narrative) {
+        let crate::body_tags::BodySegment::Tag(tag) = seg else {
+            continue;
+        };
+        if tag.name == "followups" {
+            continue; // not a data/instance view
+        }
+        let Some(view) = crate::compose::tag_to_view(&tag) else {
+            errors.push(AuthorError::at(
+                line0,
+                format!("body tag `{{{{{}}}}}` is not a known view kind", tag.name),
+            ));
+            continue;
+        };
+        let (data, specs) = view_refs(&view);
+        if !data.is_empty() {
+            body_data_refs.insert(data.to_string());
+            if !declared_aliases.contains(data) {
+                errors.push(AuthorError::at(
+                    line0,
+                    format!(
+                        "a body tag references data alias `{data}`, which is not declared in `data:`"
+                    ),
+                ));
+            }
+        }
+        if let Some(instance) = view_instance_ref(&view) {
+            body_instance_refs.insert(instance.to_string());
+            if !declared_instances.contains(instance) {
+                errors.push(AuthorError::at(
+                    line0,
+                    format!(
+                        "a body tag references instance alias `{instance}`, \
+                         which is not declared in `instances:`"
+                    ),
+                ));
+            }
+        }
+        for spec_name in specs {
+            if !skill.specs.contains_key(spec_name) {
+                errors.push(AuthorError::at(
+                    line0,
+                    format!(
+                        "a body tag names spec `{spec_name}`, which is not defined in `specs:`"
+                    ),
+                ));
+            }
+        }
+    }
+
     for alias in &declared_aliases {
-        if !used_aliases.contains(*alias) {
+        if !used_aliases.contains(*alias) && !body_data_refs.contains(*alias) {
             errors.push(AuthorError::at(
                 line0,
                 format!("data alias `{alias}` is declared but no view references it"),
@@ -256,7 +312,7 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
         }
     }
     for alias in &declared_instances {
-        if !used_instances.contains(*alias) {
+        if !used_instances.contains(*alias) && !body_instance_refs.contains(*alias) {
             errors.push(AuthorError::at(
                 line0,
                 format!("instance alias `{alias}` is declared but no view references it"),
@@ -436,5 +492,58 @@ narrative
         let errs = validate_skill_markdown("no front matter here\n");
         assert_eq!(errs.len(), 1);
         assert!(errs[0].message.contains("opening"));
+    }
+
+    fn body_tags_sample() -> &'static str {
+        // The "markdown + tags" layout: the instance alias is referenced by a
+        // body tag, not a `views:` list.
+        r#"---
+type: skill
+id: run-report
+render: a2ui
+params:
+  experiment: { type: string }
+instances:
+  exp: "[[thing::{experiment}]]"
+followups:
+  - { label: "Again {experiment}", question: "Redo {experiment}" }
+---
+## Result
+
+{{summary: exp keys=status,score}}
+
+{{markdown: exp}}
+
+{{followups}}
+"#
+    }
+
+    #[test]
+    fn body_tag_alias_reference_satisfies_the_cross_check() {
+        let errs = validate_skill_markdown(body_tags_sample());
+        assert!(
+            errs.is_empty(),
+            "body-tags report should validate: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn body_tag_referencing_undeclared_instance_is_reported() {
+        let bad = body_tags_sample().replace("{{markdown: exp}}", "{{markdown: ghost}}");
+        let errs = validate_skill_markdown(&bad);
+        assert!(
+            errs.iter().any(|e| e.message.contains("ghost")),
+            "got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_body_tag_kind_is_reported() {
+        let bad = body_tags_sample().replace("{{summary: exp keys=status,score}}", "{{wat: exp}}");
+        let errs = validate_skill_markdown(&bad);
+        assert!(
+            errs.iter().any(|e| e.message.contains("wat")),
+            "got: {errs:?}"
+        );
     }
 }

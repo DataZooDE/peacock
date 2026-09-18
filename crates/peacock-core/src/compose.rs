@@ -264,7 +264,7 @@ fn render_view(
 /// Map an inline body tag to the [`ViewSpec`] it renders. The tag's `primary`
 /// bareword (or `data`/`instance` arg) is the alias; keyed args tune the view.
 /// Returns `None` for an unknown tag name (the caller errors with the name).
-fn tag_to_view(tag: &crate::body_tags::BodyTag) -> Option<ViewSpec> {
+pub(crate) fn tag_to_view(tag: &crate::body_tags::BodyTag) -> Option<ViewSpec> {
     let alias = || tag.alias().unwrap_or("rows").to_string();
     let arg = |k: &str| tag.args.get(k).cloned();
     match tag.name.as_str() {
