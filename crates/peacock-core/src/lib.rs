@@ -11,6 +11,7 @@
 //!   parser and guardrail so an author is checked against the renderer's rules.
 
 pub mod author;
+pub mod body_tags;
 pub mod compose;
 pub mod data;
 pub mod guardrail;

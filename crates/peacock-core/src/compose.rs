@@ -54,145 +54,66 @@ pub fn compose(
     let mut vega_specs: Vec<Value> = Vec::new();
     let mut stat_specs: Vec<Value> = Vec::new();
 
-    for view in &skill.views {
-        match view {
-            ViewSpec::Kpi {
-                data,
-                agg,
-                field,
-                label,
-            } => {
-                let rs = rowset(rows, data)?;
-                let value = fold(rs, *agg, field);
-                components.push(json!({
-                    "kind": "kpi",
-                    "label": label,
-                    "field": field,
-                    "value": value,
-                }));
-            }
-            ViewSpec::Vega {
-                data,
-                spec,
-                spec_single,
-            } => {
-                let rs = rowset(rows, data)?;
-                let n = rs.rows.as_array().map(Vec::len).unwrap_or(0);
-                // Pick the single-series spec (e.g. a line) when the data has
-                // ≤1 colour series — a stacked bar across categories reads well,
-                // but a drilled single category reads better as a line.
-                let chosen = match spec_single {
-                    Some(single) if series_count(skill, spec, rs) <= 1 => single,
-                    _ => spec,
-                };
-                let mut chart = skill.specs.get(chosen).cloned().ok_or_else(|| {
-                    Error::render(format!("vega view names unknown spec `{chosen}`"))
-                })?;
+    // Two layouts. When the body carries inline `{{tags}}` (the "markdown +
+    // tags" page format), render its segments in document order — narrative
+    // text interleaved with the tagged views + the follow-up buttons. Otherwise
+    // the classic layout: the frontmatter `views:` in order, then the narrative.
+    let segments = crate::body_tags::parse_body(&skill.narrative);
+    let has_tags = segments
+        .iter()
+        .any(|s| matches!(s, crate::body_tags::BodySegment::Tag(_)));
 
-                // A top-level `geom` key marks a STATISTICAL spec (issue #6;
-                // Vega-Lite uses `mark`, never `geom`): guardrail it, inject
-                // the rows exactly like a Vega view (structuredContent /
-                // iframe parity), and route it to `stat_specs` — the backend
-                // selector's input. Composed UNCONDITIONALLY: only the PNG
-                // step needs the `ggplot` feature. Stat views always inline
-                // (no Mosaic mode for the statistics layer).
-                if chart.get("geom").is_some() {
-                    let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
-                    check_stat_spec(&chart, &columns)?;
-                    inject_stat_data(&mut chart, rs);
-                    stat_specs.push(chart.clone());
-                    components.push(json!({ "kind": "stat", "spec": chart }));
-                    continue;
+    if has_tags {
+        for seg in &segments {
+            match seg {
+                crate::body_tags::BodySegment::Markdown(md) => {
+                    let t = md.trim();
+                    if !t.is_empty() {
+                        components.push(json!({ "kind": "text", "value": t }));
+                    }
                 }
-
-                // Guardrail the AUTHORED spec first — a remote `data.url` or an
-                // expression escape hatch is rejected (ACC-4), not silently
-                // stripped.
-                check_vega_spec(&chart)?;
-
-                if mosaic_threshold.is_some_and(|t| n > t) {
-                    // Mosaic mode: do NOT inline the big rows. Emit a vgplot
-                    // spec (mark + encodings, no data) plus the escurel-owned
-                    // data-source reference (`query_ref` + bound params) — the
-                    // single allow-listed non-inline source.
-                    let query_ref = skill.data.get(data).cloned().unwrap_or_default();
-                    let source = json!({
-                        "connector": "escurel",
-                        "query_ref": query_ref,
-                        "params": bound.clone(),
-                    });
-                    check_mosaic_source(&source)?;
-                    any_mosaic = true;
-                    components.push(json!({
-                        "kind": "mosaic",
-                        "artifact": {
-                            "spec": chart,
-                            "source": source,
-                            "row_count": n,
-                        },
-                    }));
-                } else {
-                    // Default model: inject the escurel rows as inline data.
-                    inject_inline_data(&mut chart, rs.rows.clone());
-                    vega_specs.push(chart.clone());
-                    components.push(json!({ "kind": "vega", "spec": chart }));
+                crate::body_tags::BodySegment::Tag(tag) => {
+                    if tag.name == "followups" {
+                        components.push(followups_component(&skill.followups));
+                    } else {
+                        let view = tag_to_view(tag).ok_or_else(|| {
+                            Error::render(format!(
+                                "report `{}`: unknown body tag `{{{{{}}}}}`",
+                                skill.id, tag.name
+                            ))
+                        })?;
+                        components.push(render_view(
+                            &view,
+                            skill,
+                            rows,
+                            pages,
+                            bound,
+                            mosaic_threshold,
+                            &mut vega_specs,
+                            &mut stat_specs,
+                            &mut any_mosaic,
+                        )?);
+                    }
                 }
-            }
-            ViewSpec::Table { data } => {
-                let rs = rowset(rows, data)?;
-                let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
-                components.push(json!({
-                    "kind": "table",
-                    "columns": columns,
-                    "rows": rs.rows.clone(),
-                }));
-            }
-            ViewSpec::Markdown { instance } => {
-                let page = instance_page(pages, instance)?;
-                // The body rides RAW — encoding is strictly the renderer's
-                // job (the iframe escapes; a chat mapper strips).
-                components.push(json!({ "kind": "markdown", "value": page.body }));
-            }
-            ViewSpec::Frontmatter {
-                instance,
-                keys,
-                label,
-            } => {
-                let page = instance_page(pages, instance)?;
-                // Declared order; an absent key is silently omitted
-                // (instances vary). Zero facts still emit — the layout is
-                // deterministic, never data-dependent (ADR-P7).
-                let facts: Vec<Value> = keys
-                    .iter()
-                    .filter_map(|k| {
-                        page.frontmatter
-                            .get(k)
-                            .map(|v| json!({ "key": k, "value": v }))
-                    })
-                    .collect();
-                components.push(json!({
-                    "kind": "frontmatter",
-                    "label": label,
-                    "facts": facts,
-                }));
-            }
-            ViewSpec::Timeline { instance, limit } => {
-                let page = instance_page(pages, instance)?;
-                // Empty history still emits (`events: []`) — the layout is
-                // deterministic, never data-dependent (ADR-P7).
-                let events: Vec<Value> = page
-                    .events
-                    .iter()
-                    .take(*limit as usize)
-                    .map(event_json)
-                    .collect();
-                components.push(json!({ "kind": "timeline", "events": events }));
             }
         }
-    }
-
-    if !skill.narrative.trim().is_empty() {
-        components.push(json!({ "kind": "text", "value": skill.narrative.trim() }));
+    } else {
+        for view in &skill.views {
+            components.push(render_view(
+                view,
+                skill,
+                rows,
+                pages,
+                bound,
+                mosaic_threshold,
+                &mut vega_specs,
+                &mut stat_specs,
+                &mut any_mosaic,
+            )?);
+        }
+        if !skill.narrative.trim().is_empty() {
+            components.push(json!({ "kind": "text", "value": skill.narrative.trim() }));
+        }
     }
 
     let a2ui = json!({ "version": "0.9", "components": components });
@@ -219,6 +140,186 @@ pub fn compose(
         structured_content,
         png: None,
     })
+}
+
+/// Render ONE view into its A2UI component, pushing any Vega/stat spec onto the
+/// tracking vectors and flagging Mosaic mode. Shared by the classic `views:`
+/// loop and the inline-tag body layout, so both produce byte-identical
+/// components for the same view.
+#[allow(clippy::too_many_arguments)]
+fn render_view(
+    view: &ViewSpec,
+    skill: &ReportSkill,
+    rows: &BTreeMap<String, RowSet>,
+    pages: &BTreeMap<String, InstancePage>,
+    bound: &Value,
+    mosaic_threshold: Option<usize>,
+    vega_specs: &mut Vec<Value>,
+    stat_specs: &mut Vec<Value>,
+    any_mosaic: &mut bool,
+) -> Result<Value> {
+    match view {
+        ViewSpec::Kpi {
+            data,
+            agg,
+            field,
+            label,
+        } => {
+            let rs = rowset(rows, data)?;
+            let value = fold(rs, *agg, field);
+            Ok(json!({ "kind": "kpi", "label": label, "field": field, "value": value }))
+        }
+        ViewSpec::Vega {
+            data,
+            spec,
+            spec_single,
+        } => {
+            let rs = rowset(rows, data)?;
+            let n = rs.rows.as_array().map(Vec::len).unwrap_or(0);
+            // Pick the single-series spec (e.g. a line) when the data has ≤1
+            // colour series — a stacked bar across categories reads well, but a
+            // drilled single category reads better as a line.
+            let chosen = match spec_single {
+                Some(single) if series_count(skill, spec, rs) <= 1 => single,
+                _ => spec,
+            };
+            let mut chart =
+                skill.specs.get(chosen).cloned().ok_or_else(|| {
+                    Error::render(format!("vega view names unknown spec `{chosen}`"))
+                })?;
+
+            // A top-level `geom` key marks a STATISTICAL spec (issue #6;
+            // Vega-Lite uses `mark`, never `geom`): guardrail it, inject the
+            // rows exactly like a Vega view (structuredContent / iframe parity),
+            // and route it to `stat_specs`. Stat views always inline.
+            if chart.get("geom").is_some() {
+                let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
+                check_stat_spec(&chart, &columns)?;
+                inject_stat_data(&mut chart, rs);
+                stat_specs.push(chart.clone());
+                return Ok(json!({ "kind": "stat", "spec": chart }));
+            }
+
+            // Guardrail the AUTHORED spec first — a remote `data.url` or an
+            // expression escape hatch is rejected (ACC-4), not silently stripped.
+            check_vega_spec(&chart)?;
+
+            if mosaic_threshold.is_some_and(|t| n > t) {
+                let query_ref = skill.data.get(data).cloned().unwrap_or_default();
+                let source = json!({
+                    "connector": "escurel",
+                    "query_ref": query_ref,
+                    "params": bound.clone(),
+                });
+                check_mosaic_source(&source)?;
+                *any_mosaic = true;
+                Ok(json!({
+                    "kind": "mosaic",
+                    "artifact": { "spec": chart, "source": source, "row_count": n },
+                }))
+            } else {
+                inject_inline_data(&mut chart, rs.rows.clone());
+                vega_specs.push(chart.clone());
+                Ok(json!({ "kind": "vega", "spec": chart }))
+            }
+        }
+        ViewSpec::Table { data } => {
+            let rs = rowset(rows, data)?;
+            let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
+            Ok(json!({ "kind": "table", "columns": columns, "rows": rs.rows.clone() }))
+        }
+        ViewSpec::Markdown { instance } => {
+            let page = instance_page(pages, instance)?;
+            Ok(json!({ "kind": "markdown", "value": page.body }))
+        }
+        ViewSpec::Frontmatter {
+            instance,
+            keys,
+            label,
+        } => {
+            let page = instance_page(pages, instance)?;
+            let facts: Vec<Value> = keys
+                .iter()
+                .filter_map(|k| {
+                    page.frontmatter
+                        .get(k)
+                        .map(|v| json!({ "key": k, "value": v }))
+                })
+                .collect();
+            Ok(json!({ "kind": "frontmatter", "label": label, "facts": facts }))
+        }
+        ViewSpec::Timeline { instance, limit } => {
+            let page = instance_page(pages, instance)?;
+            let events: Vec<Value> = page
+                .events
+                .iter()
+                .take(*limit as usize)
+                .map(event_json)
+                .collect();
+            Ok(json!({ "kind": "timeline", "events": events }))
+        }
+    }
+}
+
+/// Map an inline body tag to the [`ViewSpec`] it renders. The tag's `primary`
+/// bareword (or `data`/`instance` arg) is the alias; keyed args tune the view.
+/// Returns `None` for an unknown tag name (the caller errors with the name).
+fn tag_to_view(tag: &crate::body_tags::BodyTag) -> Option<ViewSpec> {
+    let alias = || tag.alias().unwrap_or("rows").to_string();
+    let arg = |k: &str| tag.args.get(k).cloned();
+    match tag.name.as_str() {
+        // `{{chart: rows spec=convergence spec_single=conv_line}}`
+        "chart" | "vega" => Some(ViewSpec::Vega {
+            data: alias(),
+            spec: arg("spec").unwrap_or_else(|| "chart".to_string()),
+            spec_single: arg("spec_single"),
+        }),
+        "table" => Some(ViewSpec::Table { data: alias() }),
+        "kpi" => Some(ViewSpec::Kpi {
+            data: alias(),
+            agg: parse_agg(arg("agg").as_deref()),
+            field: arg("field").unwrap_or_default(),
+            label: arg("label").unwrap_or_default(),
+        }),
+        // `{{markdown: instance}}`
+        "markdown" => Some(ViewSpec::Markdown { instance: alias() }),
+        // `{{summary: instance keys=a,b,c label=Summary}}` — a frontmatter block
+        // (the "summary section like the skill frontmatter").
+        "summary" | "frontmatter" => Some(ViewSpec::Frontmatter {
+            instance: alias(),
+            keys: arg("keys")
+                .map(|s| {
+                    s.split(',')
+                        .map(|k| k.trim().to_string())
+                        .filter(|k| !k.is_empty())
+                        .collect()
+                })
+                .unwrap_or_default(),
+            label: arg("label").unwrap_or_default(),
+        }),
+        "timeline" => Some(ViewSpec::Timeline {
+            instance: alias(),
+            limit: arg("limit").and_then(|s| s.parse().ok()).unwrap_or(10),
+        }),
+        _ => None,
+    }
+}
+
+/// Parse a `{{kpi agg=…}}` aggregate name (reusing `Agg`'s lowercase serde),
+/// defaulting to `sum` — same default as the frontmatter `kpi` view.
+fn parse_agg(s: Option<&str>) -> crate::skill::Agg {
+    s.and_then(|s| serde_json::from_value(json!(s)).ok())
+        .unwrap_or(crate::skill::Agg::Sum)
+}
+
+/// The `{{followups}}` component: the follow-up buttons declared on the skill.
+/// Empty ⇒ an empty button list (renderers skip it), never an error.
+fn followups_component(followups: &[crate::skill::FollowupButton]) -> Value {
+    let buttons: Vec<Value> = followups
+        .iter()
+        .map(|f| json!({ "label": f.label, "question": f.question }))
+        .collect();
+    json!({ "kind": "followups", "buttons": buttons })
 }
 
 /// Count the distinct colour-series in a view's rows, per the named spec's

@@ -56,6 +56,7 @@ fn report(specs: Value) -> ReportSkill {
         narrative: String::new(),
         viewer: None,
         actions: Vec::new(),
+        followups: Vec::new(),
     }
 }
 

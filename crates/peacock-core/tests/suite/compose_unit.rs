@@ -54,6 +54,7 @@ fn report(specs: Value, views: Vec<ViewSpec>) -> ReportSkill {
         narrative: "EMEA orders only.".into(),
         viewer: None,
         actions: Vec::new(),
+        followups: Vec::new(),
     }
 }
 
@@ -287,6 +288,7 @@ fn instance_skill(views: Vec<ViewSpec>) -> ReportSkill {
         narrative: String::new(),
         viewer: None,
         actions: Vec::new(),
+        followups: Vec::new(),
     }
 }
 
@@ -405,4 +407,76 @@ fn row_artifacts_serialize_without_an_instances_key() {
     .unwrap();
     let sc = serde_json::to_value(&art.structured_content).unwrap();
     assert!(sc.get("instances").is_none(), "{sc}");
+}
+
+#[test]
+fn tagged_body_renders_views_inline_with_narrative_and_followups() {
+    // The "markdown + tags" layout: the body drives the order (narrative, chart,
+    // narrative, follow-up buttons), and the narrative is NOT also appended as a
+    // trailing blob.
+    let mut skill = report(json!({ "rev_line": rev_line_spec() }), vec![]);
+    skill.narrative =
+        "Intro line.\n\n{{chart: rev_by_cat spec=rev_line}}\n\nClosing note.\n\n{{followups}}"
+            .into();
+    skill.followups = vec![peacock_core::skill::FollowupButton {
+        label: "Drill EMEA".into(),
+        question: "Show EMEA only".into(),
+    }];
+
+    let art = compose(
+        &skill,
+        &params(),
+        &json!({ "category": "ALL" }),
+        &rows_map(),
+        &BTreeMap::new(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+
+    let comps = art.a2ui["components"].as_array().unwrap();
+    let kinds: Vec<&str> = comps.iter().map(|c| c["kind"].as_str().unwrap()).collect();
+    assert_eq!(
+        kinds,
+        vec!["text", "vega", "text", "followups"],
+        "inline document order: narrative, chart, narrative, buttons"
+    );
+    assert_eq!(
+        comps.len(),
+        4,
+        "no trailing narrative blob when the body is tagged"
+    );
+    assert!(
+        comps[1]["spec"]["data"]["values"].is_array(),
+        "the chart carries the escurel rows inline"
+    );
+    assert_eq!(comps[3]["buttons"][0]["label"], "Drill EMEA");
+    assert_eq!(comps[3]["buttons"][0]["question"], "Show EMEA only");
+}
+
+#[test]
+fn untagged_body_keeps_classic_layout() {
+    // Regression: a body with no tags still renders frontmatter views then the
+    // narrative blob (byte-for-byte the pre-tags behaviour).
+    let skill = report(
+        json!({ "rev_line": rev_line_spec() }),
+        vec![ViewSpec::Vega {
+            data: "rev_by_cat".into(),
+            spec: "rev_line".into(),
+            spec_single: None,
+        }],
+    );
+    let art = compose(
+        &skill,
+        &params(),
+        &json!({ "category": "ALL" }),
+        &rows_map(),
+        &BTreeMap::new(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+    let comps = art.a2ui["components"].as_array().unwrap();
+    let kinds: Vec<&str> = comps.iter().map(|c| c["kind"].as_str().unwrap()).collect();
+    assert_eq!(kinds, vec!["vega", "text"], "classic: view then narrative");
 }
