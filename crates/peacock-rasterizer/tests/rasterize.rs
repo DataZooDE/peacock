@@ -25,6 +25,44 @@ fn nw_chart() -> serde_json::Value {
     })
 }
 
+/// A line + point mark over a CONTINUOUS (quantitative) x — the evolve
+/// convergence chart shape (x = generation, y = best score). The aggregate
+/// keeps continuous-x rows in `raw` (not the category `values` map), so before
+/// the fix `draw_line` read the empty map and emitted axes only — no line, no
+/// points. This asserts the series line AND its point overlay are drawn.
+#[test]
+fn quantitative_x_line_draws_polyline_and_points() {
+    let spec = json!({
+        "data": { "values": [
+            { "generation": 1,  "best_score": -3.7 },
+            { "generation": 2,  "best_score": -3.3 },
+            { "generation": 3,  "best_score": -3.0 },
+            { "generation": 4,  "best_score": -2.8 },
+            { "generation": 5,  "best_score": -2.6 }
+        ]},
+        "mark": { "type": "line", "point": true },
+        "encoding": {
+            "x": { "field": "generation", "type": "quantitative", "title": "Generation" },
+            "y": { "field": "best_score", "type": "quantitative", "title": "Best score" }
+        }
+    });
+    let svg = render_vega_to_svg(&spec).expect("svg");
+    // The connecting line (one series, no color split).
+    assert_eq!(
+        svg.matches("<polyline").count(),
+        1,
+        "expected exactly one convergence polyline: {svg}"
+    );
+    // The `point: true` overlay draws one circle per datum (5 rows).
+    assert_eq!(
+        svg.matches("<circle").count(),
+        5,
+        "expected one point per generation: {svg}"
+    );
+    // Axis title still present.
+    assert!(svg.contains("Generation"));
+}
+
 #[test]
 fn compiles_subset_to_svg_with_axes_and_legend() {
     let svg = render_vega_to_svg(&nw_chart()).expect("svg");
