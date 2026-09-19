@@ -80,6 +80,56 @@ fn draw_line<F>(svg: &mut String, ctx: &MarkCtx, color_for: &F, points_only: boo
 where
     F: Fn(usize, Option<f64>) -> String,
 {
+    // Continuous (quantitative) x: the aggregate keeps rows in `raw`, not the
+    // (x-category, series) `values` map, and positions come from the linear
+    // x-scale — mirroring `draw_points`. Without this branch a line/point mark
+    // over a quantitative x (e.g. a convergence chart, x = generation) read the
+    // empty `values` map and drew nothing but axes. `draw_points` already had
+    // this path; a `line` mark's own `point: true` overlay routes through here
+    // (see `draw_marks`), so both the line and its points need it.
+    if ctx.agg.continuous_x {
+        let xl = match ctx.x_lin {
+            Some(x) => x,
+            None => return,
+        };
+        for (si, _name) in ctx.series.iter().enumerate() {
+            let color = color_for(si, None);
+            let mut pts: Vec<(f64, f64)> = ctx
+                .agg
+                .raw
+                .iter()
+                .filter(|p| p.series == si)
+                .map(|p| (p.x, p.y))
+                .collect();
+            // A line connects its points in ascending x order regardless of row
+            // order in the source data.
+            pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let mapped: Vec<(f64, f64)> = pts
+                .iter()
+                .map(|(x, y)| (xl.map(*x), ctx.y_lin.map(*y)))
+                .collect();
+            if !points_only && mapped.len() > 1 {
+                let d: String = mapped
+                    .iter()
+                    .map(|(x, y)| format!("{x:.1},{y:.1}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let _ = write!(
+                    svg,
+                    r##"<polyline points="{d}" fill="none" stroke="{color}" stroke-width="2"/>"##
+                );
+            }
+            if points_only {
+                for (x, y) in &mapped {
+                    let _ = write!(
+                        svg,
+                        r##"<circle cx="{x:.1}" cy="{y:.1}" r="3" fill="{color}"/>"##
+                    );
+                }
+            }
+        }
+        return;
+    }
     for (si, _name) in ctx.series.iter().enumerate() {
         let color = color_for(si, None);
         let pts: Vec<(f64, f64)> = (0..ctx.x_cats.len())
