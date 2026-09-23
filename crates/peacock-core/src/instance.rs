@@ -179,6 +179,7 @@ impl InstanceData for crate::data::EscurelData {
                     // error here too — this struct is a wire contract.
                     event_id: None,
                     cursor: cursor.clone(),
+                    ..Default::default()
                 })
                 .await
                 .map_err(map_err)?;
