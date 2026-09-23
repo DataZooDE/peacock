@@ -559,7 +559,27 @@ fn instance_card_request(
         subtitle: format!("{} · {}", page.skill, page.id),
         ..Default::default()
     };
-    for view in &skill.views {
+    // A "markdown + tags" report places its views inline in the body, so
+    // `skill.views` is empty; derive the effective views from the body tags
+    // (the same mapping `compose` uses) so the card carries the frontmatter
+    // facts, the markdown body, and the timeline — not just the header.
+    let derived: Vec<ViewSpec> = if skill.views.is_empty() {
+        crate::body_tags::parse_body(&skill.narrative)
+            .into_iter()
+            .filter_map(|seg| match seg {
+                crate::body_tags::BodySegment::Tag(tag) => crate::compose::tag_to_view(&tag),
+                crate::body_tags::BodySegment::Markdown(_) => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let views: &[ViewSpec] = if skill.views.is_empty() {
+        &derived
+    } else {
+        &skill.views
+    };
+    for view in views {
         match view {
             ViewSpec::Frontmatter { instance, keys, .. }
                 if *instance == alias && req.facts.is_empty() =>

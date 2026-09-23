@@ -25,6 +25,79 @@ const CUSTOMER_REPORT: &str = "---\ntype: skill\nid: customer-report\nrender: a2
       - { kind: timeline, instance: acct, limit: 5 }\n\
     ---\n";
 
+// Same views as CUSTOMER_REPORT, but placed INLINE as body tags with an empty
+// `views:` — exercises the render.rs path that derives the instance-card facts /
+// body / timeline from body tags when `views:` is empty.
+const CUSTOMER_REPORT_BODYTAGS: &str = "---\ntype: skill\nid: customer-report-bt\nrender: a2ui\n\
+    description: One customer account as a card (body-tags layout).\n\
+    params:\n  account: { type: string }\n\
+    instances:\n  acct: \"[[account::{account}]]\"\n\
+    ---\n\
+    {{summary: acct keys=name,status label=Account}}\n\n{{markdown: acct}}\n\n{{timeline: acct limit=5}}\n";
+
+#[tokio::test]
+async fn body_tags_report_renders_the_same_card_png_as_views() {
+    let nw = NorthwindEscurel::spawn_with(NorthwindOpts {
+        extra_skills: vec![
+            ("account".to_owned(), ACCOUNT_SKILL.to_owned()),
+            ("customer-report".to_owned(), CUSTOMER_REPORT.to_owned()),
+            (
+                "customer-report-bt".to_owned(),
+                CUSTOMER_REPORT_BODYTAGS.to_owned(),
+            ),
+        ],
+        extra_instances: vec![(
+            "account".to_owned(),
+            "beverages-gmbh".to_owned(),
+            BEVERAGES_GMBH.to_owned(),
+        )],
+        ..Default::default()
+    })
+    .await;
+
+    let escurel = EscurelData::new(nw.endpoint());
+    let opts = RenderOpts {
+        png_scale: Some(2.0),
+        ..Default::default()
+    };
+    let params = json!({ "account": "beverages-gmbh" });
+    let views_card = render(
+        "customer-report",
+        &params,
+        &nw.sales_principal(),
+        &escurel,
+        &opts,
+    )
+    .await
+    .expect("views render");
+    let bt_card = render(
+        "customer-report-bt",
+        &params,
+        &nw.sales_principal(),
+        &escurel,
+        &opts,
+    )
+    .await
+    .expect("body-tags render");
+
+    // The body-tags report has an empty `views:`; before the fix its card would
+    // be a bare title (no facts/body). Now it derives the same views inline, so
+    // the rasterized card is byte-identical to the `views:` report's card.
+    assert!(bt_card.vega_specs.is_empty());
+    let png = bt_card.png.as_ref().expect("body-tags instance-card png");
+    assert!(
+        png.len() > 1000,
+        "a real, non-empty card PNG, got {}",
+        png.len()
+    );
+    assert_eq!(
+        views_card.png, bt_card.png,
+        "body-tags card must render identically to the views: card"
+    );
+
+    nw.shutdown().await;
+}
+
 #[tokio::test]
 async fn instance_report_renders_a_card_png() {
     let nw = NorthwindEscurel::spawn_with(NorthwindOpts {
