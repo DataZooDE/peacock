@@ -1,7 +1,7 @@
 //! Saved / shared report instances (BRD §7) — peacock stays **stateless**.
 //!
 //! Bookmarking a parameterized render is an *escurel* concern: the saved
-//! instance is an ordinary escurel page (`type: instance, skill:
+//! instance is an ordinary escurel page (`kind: instance, skill:
 //! report_bookmark`) carrying the report wikilink and the absolute parameter
 //! vector. peacock writes it via `escurel-client` `update_page` and reads it
 //! back via `resolve` + `expand`, forwarding the caller principal so escurel's
@@ -167,7 +167,7 @@ pub async fn render_saved(
     render(&report_id, &params, principal, escurel, opts).await
 }
 
-/// The markdown a saved instance is persisted as: `type: instance`, filed
+/// The markdown a saved instance is persisted as: `kind: instance`, filed
 /// under the [`BOOKMARK_SKILL`], carrying the report wikilink, the absolute
 /// params vector, and the owner subject.
 fn bookmark_markdown(
@@ -182,7 +182,7 @@ fn bookmark_markdown(
         .map_err(|e| Error::render(format!("saved instance `{name}`: bad params: {e}")))?;
     Ok(format!(
         "---\n\
-         type: instance\n\
+         kind: instance\n\
          skill: {BOOKMARK_SKILL}\n\
          id: {name}\n\
          visibility: owner\n\

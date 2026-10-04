@@ -29,7 +29,7 @@ async fn stat_report_renders_a_density_chart_with_contract_and_p90_markers() {
     // markdown — and peacock parses it into the ggplot backend's plot with
     // no Rust changes per-chart.
     let density_skill = r#"---
-type: skill
+kind: skill
 id: northwind-revenue-density
 render: a2ui
 description: Density of Northwind order-line revenue with contract + p90 markers.

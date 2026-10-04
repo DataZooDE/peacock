@@ -46,7 +46,7 @@ fn validate_accepts_the_real_northwind_skill() {
 fn validate_rejects_a_view_referencing_a_missing_spec() {
     // A vega view names `rev_bar` but `specs:` only defines `other`.
     let bad = r#"---
-type: skill
+kind: skill
 id: broken-missing-spec
 render: a2ui
 data:
@@ -81,7 +81,7 @@ broken
 fn validate_rejects_a_remote_data_url_in_a_spec() {
     // A spec with a remote `data.url` violates the inline-data-only guardrail.
     let bad = r#"---
-type: skill
+kind: skill
 id: broken-remote-url
 render: a2ui
 data:
@@ -121,7 +121,7 @@ fn validate_accepts_a_stat_spec_report_skill() {
     // The stat-spec dialect (issue #7): a report skill declaring a density
     // chart with a contract vline + p90 marker closed-checks cleanly.
     let good = r#"---
-type: skill
+kind: skill
 id: supplier-lead-times
 render: a2ui
 data:
@@ -158,7 +158,7 @@ Per-supplier lead-time distribution.
 fn validate_rejects_a_broken_stat_spec_with_a_useful_message() {
     // Unknown geom + malformed annotation — validate names both problems.
     let bad = r#"---
-type: skill
+kind: skill
 id: broken-stat
 render: a2ui
 data:
@@ -265,4 +265,42 @@ async fn preview_renders_against_real_escurel() {
 
     let _ = NW_REPORT; // the previewed report id (asserted via render success)
     nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn scaffold_output_is_accepted_by_the_real_engine_as_a_kind_page() {
+    // The scaffold is the template every new report starts from. escurel's
+    // hard cut refuses `kind: skill` (`frontmatter_type_removed`); ask the
+    // REAL engine (no mock) whether the scaffold's frontmatter is acceptable.
+    let scaffolded = Command::new(binary())
+        .args(["author", "scaffold", "my-new-report"])
+        .output()
+        .expect("run scaffold");
+    assert!(scaffolded.status.success(), "scaffold must succeed");
+    let md = String::from_utf8(scaffolded.stdout).unwrap();
+
+    let nw = NorthwindEscurel::spawn().await;
+    let client = nw.sales_client().await;
+    let verdict = client
+        .validate(escurel_client::ValidateRequest {
+            content: md.clone(),
+            as_page_id: "markdown/skills/my-new-report.md".to_owned(),
+        })
+        .await
+        .expect("real validate call");
+    nw.shutdown().await;
+
+    let kind_problems: Vec<_> = verdict
+        .issues
+        .iter()
+        .filter(|i| {
+            i.location == "frontmatter.type"
+                || i.code == "frontmatter_type_removed"
+                || i.code == "frontmatter_kind_missing"
+        })
+        .collect();
+    assert!(
+        kind_problems.is_empty(),
+        "the real engine refused the scaffold's page kind: {kind_problems:?}\n--- scaffold ---\n{md}"
+    );
 }

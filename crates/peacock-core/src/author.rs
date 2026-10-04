@@ -391,7 +391,7 @@ fn spec_line(fm: &Value, text: &str, name: &str) -> usize {
 pub fn scaffold(report_id: &str) -> String {
     format!(
         r#"---
-type: skill
+kind: skill
 id: {report_id}
 render: a2ui
 description: TODO one-line description of this report.
@@ -423,7 +423,7 @@ mod tests {
 
     fn sample() -> &'static str {
         r#"---
-type: skill
+kind: skill
 id: demo
 render: a2ui
 data:
@@ -498,7 +498,7 @@ narrative
         // The "markdown + tags" layout: the instance alias is referenced by a
         // body tag, not a `views:` list.
         r#"---
-type: skill
+kind: skill
 id: run-report
 render: a2ui
 params:

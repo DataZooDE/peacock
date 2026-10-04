@@ -4,6 +4,21 @@ The skill version tracks the consumer-facing contract; the peacock
 repo's checked-out git ref is the true version pin (see `SKILL.md` →
 "How this skill is installed").
 
+## 0.1.1 — escurel `kind:` release
+
+Follows the escurel BREAKING release (see escurel's `docs/deploy/consumer-rollout.md`):
+
+- Every page example uses `kind: skill|instance` (the `type:` page-kind key was
+  removed by the engine: `frontmatter_type_removed`). `peacock author scaffold`
+  now emits `kind:`, and peacock's saved-render instances are written with
+  `kind: instance`.
+- The `actions:` objects documented in `02` already match escurel's wire shape
+  `{name, kind: prompt|event, label, event?, prompt?}` (list_skills returns them
+  as such; plain skill-id strings are rejected by the engine).
+- A skill page may now declare `folder`, `role`, `tags` and the OKF keys
+  (`title`, `resource`, `generated`, `verified`, `status`, `stale_after`,
+  `sources`): peacock ignores them, the escurel workbench shows them.
+
 ## 0.1.0 — initial release
 
 The consumer-facing contract for the report renderer + MCP-App host,

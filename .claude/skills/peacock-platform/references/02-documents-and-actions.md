@@ -25,7 +25,7 @@ never shadows it):
 
 ```yaml
 ---
-type: skill
+kind: skill
 id: account
 # …schema fields…
 viewer: { report: customer-report, param: account }

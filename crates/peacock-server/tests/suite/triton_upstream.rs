@@ -129,7 +129,7 @@ async fn triton_proxies_render_report_and_the_ui_resource() {
 /// escurel — the whole Sources-action chain minus the browser.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn triton_dispatches_emit_document_event() {
-    const ACTIONS_ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+    const ACTIONS_ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
         description: A customer account.\nrequired_frontmatter: [id, name]\n\
         actions:\n\
         \x20 - name: renewal-at-risk\n\
@@ -139,7 +139,7 @@ async fn triton_dispatches_emit_document_event() {
         \x20   title: \"{frontmatter.name}\"\n\
         \x20   body: \"renewal at risk\"\n\
         ---\n# account\n";
-    const ACCOUNT: &str = "---\ntype: instance\nskill: account\nid: initech-corp\n\
+    const ACCOUNT: &str = "---\nkind: instance\nskill: account\nid: initech-corp\n\
         name: Initech Corp\n---\n# Initech Corp\n";
 
     let nw = NorthwindEscurel::spawn_with(peacock_test_support::NorthwindOpts {
