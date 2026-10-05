@@ -127,7 +127,7 @@ rendering never enters it.</figcaption>
 ## 2.2 escurel: knowledge base and data virtualization
 
 escurel organizes everything as Markdown pages under a *skill::instance*
-model[^skillinst]. A **skill** is a page with `type: skill` whose front
+model[^skillinst]. A **skill** is a page with `kind: skill` whose front
 matter declares the schema its instances must satisfy (`required_frontmatter`,
 `optional_frontmatter`), an `owner_field` and an `acl` block, and —
 optionally — a `backend` block binding the skill to an external data source.
@@ -179,7 +179,7 @@ each owned by escurel, which we follow on `nw_revenue_by_category`:
 
 ```yaml
 ---
-type: skill
+kind: skill
 id: nw_revenue_by_category
 backend:
   kind: sql_view
@@ -251,7 +251,7 @@ is the agent-authored narrative:
 
 ```yaml
 ---
-type: skill
+kind: skill
 id: northwind-monthly-revenue
 render: a2ui
 description: Northwind monthly revenue by product category (EMEA).

@@ -11,16 +11,16 @@ use peacock_core::{EscurelData, RenderOpts, render};
 use peacock_test_support::{NorthwindEscurel, NorthwindOpts};
 use serde_json::json;
 
-const ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+const ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n---\n# account\n";
 
-const BEVERAGES_GMBH: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+const BEVERAGES_GMBH: &str = "---\nkind: instance\nskill: account\nid: beverages-gmbh\n\
     name: Beverages GmbH\n---\n# Beverages GmbH\n\nEU distributor.\n";
 
 const ACCOUNT_PAGE: &str = "markdown/instances/account/beverages-gmbh.md";
 
 /// A customer report with an activity timeline (limit 2 pins the cap).
-const TIMELINE_REPORT: &str = "---\ntype: skill\nid: timeline-report\nrender: a2ui\n\
+const TIMELINE_REPORT: &str = "---\nkind: skill\nid: timeline-report\nrender: a2ui\n\
     description: One customer's recent activity.\n\
     params:\n  account: { type: string }\n\
     instances:\n  acct: \"[[account::{account}]]\"\n\
@@ -179,7 +179,7 @@ async fn empty_history_still_emits_the_component() {
 /// three `list_events` hops; the single-request implementation made one.
 #[tokio::test]
 async fn timeline_drains_past_one_wire_page() {
-    const BIG_REPORT: &str = "---\ntype: skill\nid: big-timeline\nrender: a2ui\n\
+    const BIG_REPORT: &str = "---\nkind: skill\nid: big-timeline\nrender: a2ui\n\
         description: Full activity history.\n\
         params:\n  account: { type: string }\n\
         instances:\n  acct: \"[[account::{account}]]\"\n\

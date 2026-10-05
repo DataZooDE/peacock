@@ -47,7 +47,7 @@ fn order_lines_dir() -> PathBuf {
 
 /// The `query` meta-skill (so query instances validate).
 fn skill_query() -> String {
-    "---\ntype: skill\nid: query\ndescription: Reusable parameterised reads.\n---\n# query\n"
+    "---\nkind: skill\nid: query\ndescription: Reusable parameterised reads.\n---\n# query\n"
         .to_owned()
 }
 
@@ -61,7 +61,7 @@ pub const BOOKMARK_SKILL: &str = "report_bookmark";
 /// the owner ACL gates them to their creator).
 fn skill_bookmark() -> String {
     "---\n\
-     type: skill\n\
+     kind: skill\n\
      id: report_bookmark\n\
      description: A saved/shared parameterized render (bookmark).\n\
      visibility: owner\n\
@@ -78,7 +78,7 @@ fn skill_bookmark() -> String {
 fn skill_order_lines(relation: &str) -> String {
     format!(
         "---\n\
-         type: skill\n\
+         kind: skill\n\
          id: nw_order_lines\n\
          description: Northwind order lines, mirrored read-only from Parquet.\n\
          backend:\n  kind: sql_view\n  source: {{ connector: parquet_dir, relation: {relation} }}\n  search_text: [category]\n\
@@ -94,7 +94,7 @@ fn skill_order_lines(relation: &str) -> String {
 /// `{{target}}` managed view.
 fn query_revenue_by_category() -> String {
     "---\n\
-     type: instance\n\
+     kind: instance\n\
      skill: query\n\
      id: nw_revenue_by_category\n\
      target: \"[[nw_order_lines::eu]]\"\n\
@@ -125,7 +125,7 @@ pub fn skill_report_markdown() -> String {
 
 fn skill_report() -> String {
     r#"---
-type: skill
+kind: skill
 id: northwind-monthly-revenue
 render: a2ui
 description: Northwind monthly revenue by product category (EMEA).
@@ -164,7 +164,7 @@ Revenue is recognised at order date, net of line discount. EMEA orders only.
 /// byte-identical); tests opt in via [`NorthwindOpts::extra_skills`].
 pub fn skill_report_distribution() -> String {
     r#"---
-type: skill
+kind: skill
 id: northwind-revenue-distribution
 render: a2ui
 description: Distribution of Northwind order-line revenue (EMEA).
@@ -192,7 +192,7 @@ Distribution of individual order-line revenue; EMEA orders only.
 /// Revenue per product, ranked — drives the "top products" bar.
 fn query_revenue_by_product() -> String {
     "---\n\
-     type: instance\n\
+     kind: instance\n\
      skill: query\n\
      id: nw_revenue_by_product\n\
      target: \"[[nw_order_lines::eu]]\"\n\
@@ -211,7 +211,7 @@ fn query_revenue_by_product() -> String {
 /// Revenue per destination country — drives the geography donut.
 fn query_revenue_by_country() -> String {
     "---\n\
-     type: instance\n\
+     kind: instance\n\
      skill: query\n\
      id: nw_revenue_by_country\n\
      target: \"[[nw_order_lines::eu]]\"\n\
@@ -230,7 +230,7 @@ fn query_revenue_by_country() -> String {
 /// Revenue per salesperson, ranked — drives the sales-manager leaderboard.
 fn query_revenue_by_salesperson() -> String {
     "---\n\
-     type: instance\n\
+     kind: instance\n\
      skill: query\n\
      id: nw_revenue_by_salesperson\n\
      target: \"[[nw_order_lines::eu]]\"\n\
@@ -249,7 +249,7 @@ fn query_revenue_by_salesperson() -> String {
 /// Raw order lines with computed line revenue — drives the discount scatter.
 fn query_order_line_values() -> String {
     "---\n\
-     type: instance\n\
+     kind: instance\n\
      skill: query\n\
      id: nw_order_line_values\n\
      target: \"[[nw_order_lines::eu]]\"\n\
@@ -272,7 +272,7 @@ fn query_order_line_values() -> String {
 /// products by revenue desc, so the bars read as a leaderboard).
 fn skill_report_products() -> String {
     r#"---
-type: skill
+kind: skill
 id: northwind-top-products
 render: a2ui
 description: Northwind best-selling products by revenue (EMEA, 1997).
@@ -301,7 +301,7 @@ Best-selling products by net revenue, highest first. EMEA orders only.
 /// Revenue share by destination country — a donut.
 fn skill_report_country() -> String {
     r#"---
-type: skill
+kind: skill
 id: northwind-sales-by-country
 render: a2ui
 description: Northwind revenue share by destination country (EMEA, 1997).
@@ -329,7 +329,7 @@ Where the revenue comes from, by destination country. EMEA orders only.
 /// Month × category revenue heatmap — reuses the category query, renders rect.
 fn skill_report_season() -> String {
     r#"---
-type: skill
+kind: skill
 id: northwind-seasonality
 render: a2ui
 description: Northwind revenue seasonality — month × category heatmap (EMEA, 1997).
@@ -359,7 +359,7 @@ Which categories peak in which months. Darker = more revenue. EMEA orders only.
 /// Discount vs. line value — a coloured, size-encoded scatter.
 fn skill_report_discount() -> String {
     r#"---
-type: skill
+kind: skill
 id: northwind-discount-vs-value
 render: a2ui
 description: Northwind discount vs. order-line value (EMEA, 1997).
@@ -391,7 +391,7 @@ Does discounting drive bigger orders? Each point is one order line. EMEA only.
 /// another field (peacock #4/#5).
 fn skill_report_leaderboard() -> String {
     r#"---
-type: skill
+kind: skill
 id: northwind-salesperson-leaderboard
 render: a2ui
 description: Northwind revenue per salesperson, ranked (EMEA, 1997).
@@ -482,10 +482,21 @@ impl NorthwindEscurel {
         }
         let fixtures = fixtures.done();
 
+        // The engine confines directory connectors to the operator's allow-list
+        // (`ESCUREL_SQL_FILE_DIRS`); the Northwind parquet lives in this repo's fixtures, so a
+        // gateway the caller did not give its own policy exposes that directory (and the temp dir).
+        let mut config_overrides = opts.config_overrides;
+        if config_overrides.egress.is_none() {
+            config_overrides.egress = Some(escurel_test_support::EgressPolicy {
+                sql_file_dirs: vec![order_lines_dir(), std::env::temp_dir()],
+                ..Default::default()
+            });
+        }
+
         let process = EscurelProcess::spawn(Opts {
             auth: AuthMode::TestIssuer,
             fixtures: Some(fixtures),
-            config_overrides: opts.config_overrides,
+            config_overrides,
         })
         .await;
 

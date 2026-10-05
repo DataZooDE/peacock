@@ -13,7 +13,7 @@ use serde_json::json;
 
 /// The account skill declares actions but NO viewer — the generic
 /// document view renders it.
-const ACCOUNT_SKILL_ACTIONS: &str = "---\ntype: skill\nid: account\n\
+const ACCOUNT_SKILL_ACTIONS: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n\
     optional_frontmatter: [status, category, email]\n\
     actions:\n\
@@ -31,7 +31,7 @@ const ACCOUNT_SKILL_ACTIONS: &str = "---\ntype: skill\nid: account\n\
 
 /// The same skill WITH a viewer: the document view delegates to the
 /// authored customer-report.
-const ACCOUNT_SKILL_VIEWER: &str = "---\ntype: skill\nid: account\n\
+const ACCOUNT_SKILL_VIEWER: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n\
     optional_frontmatter: [status, category, email]\n\
     viewer: { report: customer-report, param: account }\n\
@@ -42,13 +42,13 @@ const ACCOUNT_SKILL_VIEWER: &str = "---\ntype: skill\nid: account\n\
     \x20   prompt: \"whats the next best action for {id}?\"\n\
     ---\n# account\n";
 
-const BEVERAGES_GMBH: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+const BEVERAGES_GMBH: &str = "---\nkind: instance\nskill: account\nid: beverages-gmbh\n\
     name: Beverages GmbH\nstatus: follow_up\ncategory: Beverages\n\
     email: maria@beverages.example\n---\n# Beverages GmbH\n\n\
     EU beverages distributor; renewal due in Q3.\n\n\
     See [[email::mail-1]] for the renewal thread.\n";
 
-const CUSTOMER_REPORT: &str = "---\ntype: skill\nid: customer-report\nrender: a2ui\n\
+const CUSTOMER_REPORT: &str = "---\nkind: skill\nid: customer-report\nrender: a2ui\n\
     description: One customer account as a card.\n\
     params:\n  account: { type: string }\n\
     instances:\n  acct: \"[[account::{account}]]\"\n\
@@ -197,7 +197,7 @@ async fn frontmatter_placeholder_substitutes_and_missing_key_fails() {
     .expect("substitution over present keys renders");
 
     // A skill page naming an ABSENT frontmatter key is an author error.
-    const BAD_KEY_SKILL: &str = "---\ntype: skill\nid: account\n\
+    const BAD_KEY_SKILL: &str = "---\nkind: skill\nid: account\n\
         description: A customer account.\nrequired_frontmatter: [id, name]\n\
         actions:\n\
         \x20 - name: bad\n\
@@ -271,7 +271,7 @@ async fn smuggled_document_params_fail_closed() {
 async fn reserved_id_shadows_an_authored_document_report() {
     // An authored report skill named `document` is never resolved — the
     // reserved pseudo-report intercepts first (documented contract).
-    const IMPOSTER: &str = "---\ntype: skill\nid: document\nrender: a2ui\n\
+    const IMPOSTER: &str = "---\nkind: skill\nid: document\nrender: a2ui\n\
         description: An imposter.\nparams: {}\ndata: {}\nviews: []\n---\n";
     let mut opts = doc_opts(ACCOUNT_SKILL_ACTIONS);
     opts.extra_skills
@@ -297,7 +297,7 @@ async fn reserved_id_shadows_an_authored_document_report() {
 
 #[tokio::test]
 async fn group_gated_document_fails_closed() {
-    const GATED: &str = "---\ntype: skill\nid: account\n\
+    const GATED: &str = "---\nkind: skill\nid: account\n\
         description: A customer account.\nrequired_frontmatter: [id, name]\n\
         acl: { read: [sales] }\n\
         actions:\n\

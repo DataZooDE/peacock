@@ -7,9 +7,9 @@ use escurel_client::ResolveRequest;
 use escurel_test_support::ConfigOverrides;
 use peacock_test_support::{NorthwindEscurel, NorthwindOpts};
 
-const ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+const ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n---\n# account\n";
-const ACCOUNT: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+const ACCOUNT: &str = "---\nkind: instance\nskill: account\nid: beverages-gmbh\n\
     name: Beverages GmbH\n---\n# Beverages GmbH\n";
 
 #[tokio::test]

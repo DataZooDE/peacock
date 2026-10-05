@@ -72,7 +72,7 @@ means peacock.
 
 ## 2. Glossary
 
-- **Report skill** — an escurel skill (`type: skill`, `render: a2ui`)
+- **Report skill** — an escurel skill (`kind: skill`, `render: a2ui`)
   whose front matter declares render parameters and binds data via typed
   references to structured data views, and whose body holds the
   declarative view layout + narrative.

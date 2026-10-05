@@ -202,17 +202,17 @@ async fn in_iframe_drill_is_a_fresh_render() {
 
 // ── instance reports on the MCP surface ──
 
-const ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+const ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n---\n# account\n";
 
 /// The body carries hostile markup — the artifact transports it RAW (typed
 /// contract); only the RENDERER escapes. The iframe test below pins the
 /// escape path.
-const HOSTILE_ACCOUNT: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+const HOSTILE_ACCOUNT: &str = "---\nkind: instance\nskill: account\nid: beverages-gmbh\n\
     name: \"Beverages <script>alert(1)</script>\"\n---\n# Beverages GmbH\n\n\
     Note: <script>alert(1)</script> rides verbatim.\n";
 
-const CUSTOMER_REPORT: &str = "---\ntype: skill\nid: customer-report\nrender: a2ui\n\
+const CUSTOMER_REPORT: &str = "---\nkind: skill\nid: customer-report\nrender: a2ui\n\
     description: One customer account as a card.\n\
     params:\n  account: { type: string }\n\
     instances:\n  acct: \"[[account::{account}]]\"\n\
@@ -415,7 +415,7 @@ async fn the_iframe_surfaces_render_errors_and_derives_drill_chips() {
 
 /// An account skill with document affordances: a prompt action and an
 /// event action (`actions:` frontmatter — the skill page is the contract).
-const ACTIONS_ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+const ACTIONS_ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n\
     optional_frontmatter: [status]\n\
     actions:\n\
@@ -431,7 +431,7 @@ const ACTIONS_ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
     \x20   body: \"renewal at risk (flagged from the document)\"\n\
     ---\n# account\n";
 
-const PLAIN_ACCOUNT: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+const PLAIN_ACCOUNT: &str = "---\nkind: instance\nskill: account\nid: beverages-gmbh\n\
     name: Beverages GmbH\nstatus: follow_up\n---\n# Beverages GmbH\n\n\
     See [[email::mail-1]] for the renewal thread.\n";
 

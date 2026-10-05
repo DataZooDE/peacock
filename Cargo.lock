@@ -1616,12 +1616,16 @@ dependencies = [
 name = "escurel-auth"
 version = "1.0.0"
 dependencies = [
+ "base64",
  "jsonwebtoken",
  "reqwest 0.12.28",
+ "rsa",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
+ "ulid",
 ]
 
 [[package]]
@@ -1638,6 +1642,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.24.0",
+ "tracing",
 ]
 
 [[package]]
@@ -1664,6 +1669,8 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1681,6 +1688,7 @@ dependencies = [
  "escurel-embed",
  "escurel-md",
  "escurel-storage",
+ "escurel-types",
  "html-to-markdown-rs",
  "kreuzberg",
  "regex",
@@ -1711,6 +1719,7 @@ dependencies = [
  "opentelemetry_sdk",
  "prometheus",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
  "time",
  "tracing",
@@ -3938,6 +3947,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "clap",
+ "escurel-client",
  "peacock-core",
  "peacock-rasterizer",
  "peacock-server",
@@ -6425,6 +6435,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "triton-config"
+version = "0.0.1"
+dependencies = [
+ "triton-core",
+]
+
+[[package]]
 name = "triton-core"
 version = "0.0.1"
 dependencies = [
@@ -6502,6 +6519,7 @@ dependencies = [
  "sha2 0.10.9",
  "tiny-skia 0.11.4",
  "tokio",
+ "triton-config",
  "triton-core",
  "triton-correlation",
  "triton-manifest",

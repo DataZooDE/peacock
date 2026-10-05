@@ -34,7 +34,7 @@ fn deliveries_dir() -> PathBuf {
 
 /// The `query` meta-skill (so query instances validate).
 fn skill_query() -> String {
-    "---\ntype: skill\nid: query\ndescription: Reusable parameterised reads.\n---\n# query\n"
+    "---\nkind: skill\nid: query\ndescription: Reusable parameterised reads.\n---\n# query\n"
         .to_owned()
 }
 
@@ -44,7 +44,7 @@ fn skill_query() -> String {
 fn skill_supplier_deliveries(relation: &str) -> String {
     format!(
         "---\n\
-         type: skill\n\
+         kind: skill\n\
          id: supplier_deliveries\n\
          description: Completed inbound deliveries with realised lead times, mirrored read-only from Parquet.\n\
          backend:\n  kind: sql_view\n  source: {{ connector: parquet_dir, relation: {relation} }}\n  search_text: [supplier]\n\
@@ -60,7 +60,7 @@ fn skill_supplier_deliveries(relation: &str) -> String {
 /// `{{target}}` managed view.
 fn query_lead_times() -> String {
     "---\n\
-     type: instance\n\
+     kind: instance\n\
      skill: query\n\
      id: sd_lead_times\n\
      target: \"[[supplier_deliveries::inbound]]\"\n\
@@ -80,7 +80,7 @@ fn query_lead_times() -> String {
 /// entirely in escurel markdown, rendered by the ggplot backend.
 pub fn skill_report_lead_times() -> String {
     r#"---
-type: skill
+kind: skill
 id: supplier-lead-times
 render: a2ui
 description: Distribution of realised supplier lead times vs the contracted SLA.

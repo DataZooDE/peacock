@@ -9,7 +9,7 @@ parses the frontmatter. Canonical parser:
 
 ```yaml
 ---
-type: skill
+kind: skill
 id: monthly-revenue
 render: a2ui
 description: Monthly revenue by category.

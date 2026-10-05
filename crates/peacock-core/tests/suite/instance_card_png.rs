@@ -8,14 +8,14 @@ use peacock_core::{EscurelData, RenderOpts, render};
 use peacock_test_support::{NorthwindEscurel, NorthwindOpts};
 use serde_json::json;
 
-const ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+const ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n---\n# account\n";
 
-const BEVERAGES_GMBH: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+const BEVERAGES_GMBH: &str = "---\nkind: instance\nskill: account\nid: beverages-gmbh\n\
     name: Beverages GmbH\nstatus: follow_up\n---\n# Beverages GmbH\n\n\
     EU beverages distributor; renewal due in Q3.\n";
 
-const CUSTOMER_REPORT: &str = "---\ntype: skill\nid: customer-report\nrender: a2ui\n\
+const CUSTOMER_REPORT: &str = "---\nkind: skill\nid: customer-report\nrender: a2ui\n\
     description: One customer account as a card.\n\
     params:\n  account: { type: string }\n\
     instances:\n  acct: \"[[account::{account}]]\"\n\
@@ -28,7 +28,7 @@ const CUSTOMER_REPORT: &str = "---\ntype: skill\nid: customer-report\nrender: a2
 // Same views as CUSTOMER_REPORT, but placed INLINE as body tags with an empty
 // `views:` — exercises the render.rs path that derives the instance-card facts /
 // body / timeline from body tags when `views:` is empty.
-const CUSTOMER_REPORT_BODYTAGS: &str = "---\ntype: skill\nid: customer-report-bt\nrender: a2ui\n\
+const CUSTOMER_REPORT_BODYTAGS: &str = "---\nkind: skill\nid: customer-report-bt\nrender: a2ui\n\
     description: One customer account as a card (body-tags layout).\n\
     params:\n  account: { type: string }\n\
     instances:\n  acct: \"[[account::{account}]]\"\n\

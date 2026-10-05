@@ -11,24 +11,24 @@ use peacock_core::{EscurelData, RenderOpts, render};
 use peacock_test_support::{NorthwindEscurel, NorthwindOpts};
 use serde_json::json;
 
-const ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+const ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n\
     optional_frontmatter: [status, category, email]\n---\n# account\n";
 
-const BEVERAGES_GMBH: &str = "---\ntype: instance\nskill: account\nid: beverages-gmbh\n\
+const BEVERAGES_GMBH: &str = "---\nkind: instance\nskill: account\nid: beverages-gmbh\n\
     name: Beverages GmbH\nstatus: follow_up\ncategory: Beverages\n\
     email: maria@beverages.example\n---\n# Beverages GmbH\n\n\
     EU beverages distributor; renewal due in Q3.\n\n\
     Follow-up scheduled: renewal at risk.\n";
 
 /// A group-gated account skill: only `sales` may read its instances.
-const GATED_ACCOUNT_SKILL: &str = "---\ntype: skill\nid: account\n\
+const GATED_ACCOUNT_SKILL: &str = "---\nkind: skill\nid: account\n\
     description: A customer account.\nrequired_frontmatter: [id, name]\n\
     acl: { read: [sales] }\n---\n# account\n";
 
 /// The customer report: one instance alias, facts + body views. `account` is
 /// a REQUIRED string param (no default) substituted into the instance ref.
-const CUSTOMER_REPORT: &str = "---\ntype: skill\nid: customer-report\nrender: a2ui\n\
+const CUSTOMER_REPORT: &str = "---\nkind: skill\nid: customer-report\nrender: a2ui\n\
     description: One customer account as a card.\n\
     params:\n  account: { type: string }\n\
     instances:\n  acct: \"[[account::{account}]]\"\n\
@@ -254,7 +254,7 @@ async fn data_and_instances_coexist() {
     // (Rust's `\` line continuation strips leading whitespace — the YAML
     // indentation must ride inside the escapes.)
     const MIXED_QUERY: &str = "---\n\
-        type: instance\n\
+        kind: instance\n\
         skill: query\n\
         id: q_account_revenue\n\
         target: \"[[nw_order_lines::eu]]\"\n\
@@ -265,7 +265,7 @@ async fn data_and_instances_coexist() {
         GROUP BY 1, 2 ORDER BY 2\"\n\
         ---\n\
         # q_account_revenue\n";
-    const MIXED_REPORT: &str = "---\ntype: skill\nid: mixed-report\nrender: a2ui\n\
+    const MIXED_REPORT: &str = "---\nkind: skill\nid: mixed-report\nrender: a2ui\n\
         description: Rows and a record in one report.\n\
         params:\n  account: { type: string }\n\
         data:\n  rows: \"[[query::q_account_revenue]]\"\n\
