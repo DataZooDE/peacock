@@ -482,10 +482,21 @@ impl NorthwindEscurel {
         }
         let fixtures = fixtures.done();
 
+        // The engine confines directory connectors to the operator's allow-list
+        // (`ESCUREL_SQL_FILE_DIRS`); the Northwind parquet lives in this repo's fixtures, so a
+        // gateway the caller did not give its own policy exposes that directory (and the temp dir).
+        let mut config_overrides = opts.config_overrides;
+        if config_overrides.egress.is_none() {
+            config_overrides.egress = Some(escurel_test_support::EgressPolicy {
+                sql_file_dirs: vec![order_lines_dir(), std::env::temp_dir()],
+                ..Default::default()
+            });
+        }
+
         let process = EscurelProcess::spawn(Opts {
             auth: AuthMode::TestIssuer,
             fixtures: Some(fixtures),
-            config_overrides: opts.config_overrides,
+            config_overrides,
         })
         .await;
 
