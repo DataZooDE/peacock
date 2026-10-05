@@ -56,10 +56,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: DataZooDE/escurel
-          # TEMPORARY: the escurel `kind:` release branch. Peacock's pages and
-          # the wire changed with that release; switch back to the default
-          # branch (delete this `ref:`) once it is merged to escurel main.
-          ref: feature/okf-knowledge
           path: escurel
 
       - name: Checkout triton (path dep)
