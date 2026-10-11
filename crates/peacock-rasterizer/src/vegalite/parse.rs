@@ -94,6 +94,9 @@ pub struct Channel {
     pub label_angle: Option<f64>,
     pub grid: Option<bool>,
     pub stack: Option<String>,
+    pub legend_orient: Option<String>,
+    pub legend_title: Option<Option<String>>,
+    pub legend_label_limit: Option<f64>,
 }
 
 impl Channel {
@@ -151,6 +154,19 @@ impl Channel {
                 Value::Null => Some("none".to_owned()),
                 _ => None,
             }),
+            legend_orient: v
+                .get("legend")
+                .and_then(|l| l.get("orient"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            legend_title: v
+                .get("legend")
+                .and_then(|l| l.get("title"))
+                .map(|t| t.as_str().map(str::to_owned)),
+            legend_label_limit: v
+                .get("legend")
+                .and_then(|l| l.get("labelLimit"))
+                .and_then(Value::as_f64),
         }
     }
 
@@ -170,6 +186,12 @@ impl Channel {
             Some(t) if t.is_empty() => None,
             Some(t) => Some(t.clone()),
             None => self.field.clone(),
+        }
+    }
+    pub fn legend_title(&self) -> Option<String> {
+        match &self.legend_title {
+            Some(title) => title.clone(),
+            None => self.effective_title(),
         }
     }
 }

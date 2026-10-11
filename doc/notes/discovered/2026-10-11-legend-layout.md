@@ -1,0 +1,7 @@
+# Raster legend placement and label width
+
+**Symptom.** A safe Vega-Lite spec could set `encoding.color.legend`, but the PNG/SVG renderer always reserved 150 px on the right. Long labels were cut off at the canvas edge, including S2D last-time-buy series names.
+
+**Fix.** The pure-Rust rasterizer reads `legend.orient`, `legend.title`, and `legend.labelLimit`. The default and `right` put the legend to the right; the reserved width uses DejaVu Sans glyph advances for the longest title or label, with a 40% canvas cap. Text that exceeds available width ends in `…`. `bottom` puts discrete entries below the plot and wraps them as needed, leaving the plot at full width. `title: null` hides the title. `labelLimit: 0` removes the requested limit, subject to canvas space. `none` hides the legend. Other orientations (including `top` and `left`) fall back to right. These rules apply to cartesian and arc charts; a continuous-color gradient can also move below the plot.
+
+**Recognise it.** If a report shows partial legend labels, check the exported SVG for the legend text and its x coordinate against the canvas width. Run `cargo run -p peacock-rasterizer --example s2d_ltb_legend -- /tmp/s2d-ltb-bottom-legend.png` to render the aggregate/fold line chart and inspect both PNG and SVG. The `legend_layout` tests cover the supported options. The core guardrail already accepts these declarative legend keys, so no guardrail change was needed.

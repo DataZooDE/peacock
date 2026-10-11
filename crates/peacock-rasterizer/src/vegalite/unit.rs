@@ -16,7 +16,6 @@ use crate::RasterError;
 pub(crate) const M_LEFT: f64 = 64.0;
 pub(crate) const M_TOP: f64 = 20.0;
 pub(crate) const M_BOTTOM: f64 = 56.0;
-const LEGEND_W: f64 = 150.0;
 const M_RIGHT_BARE: f64 = 24.0;
 
 /// Render one unit view. `overlay` true means "don't redraw the background /
@@ -97,7 +96,25 @@ fn render_cartesian(
         .as_ref()
         .map(|c| c.is_quantitative())
         .unwrap_or(false);
-    let has_legend = has_color;
+    let legend_orient =
+        legend::Orient::parse(enc.color.as_ref().and_then(|c| c.legend_orient.as_deref()));
+    let has_legend = has_color && legend_orient != legend::Orient::None;
+    let color_field = enc.color.as_ref().and_then(|c| c.field.clone());
+    let mut series: Vec<String> = Vec::new();
+    for r in rows {
+        let s = match &color_field {
+            Some(cf) => data::cell_string(r.get(cf)),
+            None => y_ch.field.clone().unwrap_or_default(),
+        };
+        data::index_of(&mut series, &s);
+    }
+    if !color_continuous {
+        series.sort();
+    } else if matches!(mark, Mark::Bar | Mark::Area) {
+        // A continuous colour paints each datum by value, rather than
+        // splitting a bar or area into per-value sub-marks.
+        series = vec![String::new()];
+    }
 
     let user_w = spec.get("width").and_then(Value::as_f64);
     let user_h = spec.get("height").and_then(Value::as_f64);
@@ -123,11 +140,38 @@ fn render_cartesian(
         M_LEFT
     };
 
-    let m_right = if has_legend { LEGEND_W } else { M_RIGHT_BARE };
+    let legend_title = enc.color.as_ref().and_then(|c| c.legend_title());
+    let label_limit = enc.color.as_ref().and_then(|c| c.legend_label_limit);
+    let canvas_width = user_w
+        .map(|w| w + m_left + 150.0)
+        .unwrap_or(super::DEFAULT_W);
+    let m_right = if has_legend && legend_orient == legend::Orient::Right {
+        if color_continuous {
+            150.0
+        } else {
+            legend::right_width(&series, legend_title.as_deref(), canvas_width, label_limit)
+        }
+    } else {
+        M_RIGHT_BARE
+    };
     let plot_w = user_w.unwrap_or(super::DEFAULT_W - m_left - m_right);
     let plot_h = user_h.unwrap_or(super::DEFAULT_H - M_TOP - M_BOTTOM);
     let width = m_left + plot_w + m_right;
-    let height = M_TOP + plot_h + M_BOTTOM;
+    let bottom_extra = if has_legend && legend_orient == legend::Orient::Bottom {
+        if color_continuous {
+            180.0
+        } else {
+            legend::bottom_height(
+                &series,
+                legend_title.as_deref(),
+                width - m_left - 12.0,
+                label_limit,
+            )
+        }
+    } else {
+        0.0
+    };
+    let height = M_TOP + plot_h + M_BOTTOM + bottom_extra;
 
     let plot_x0 = m_left;
     let plot_x1 = m_left + plot_w;
@@ -135,7 +179,7 @@ fn render_cartesian(
     let plot_y1 = M_TOP + plot_h;
 
     let frame = Frame {
-        height,
+        height: M_TOP + plot_h + M_BOTTOM,
         plot_x0,
         plot_x1,
         plot_y0,
@@ -163,25 +207,6 @@ fn render_cartesian(
     }
 
     // color series
-    let color_field = enc.color.as_ref().and_then(|c| c.field.clone());
-    let mut series: Vec<String> = Vec::new();
-    for r in rows {
-        let s = match &color_field {
-            Some(cf) => data::cell_string(r.get(cf)),
-            None => y_ch.field.clone().unwrap_or_default(),
-        };
-        data::index_of(&mut series, &s);
-    }
-    if !color_continuous {
-        series.sort();
-    } else if matches!(mark, Mark::Bar | Mark::Area) {
-        // A CONTINUOUS colour paints each datum by value on a ramp; it does NOT
-        // split a category into per-series sub-marks. Collapse to one series so
-        // bar/area layout uses the FULL band (one mark per category, coloured by
-        // its own value) — not `1/n` slivers.
-        series = vec![String::new()];
-    }
-
     // Stacking applies to bar/area with a color series and quantitative y.
     let stacked = should_stack(mark, &y_ch, enc.color.as_ref(), &series);
 
@@ -353,7 +378,8 @@ fn render_cartesian(
                 lo,
                 hi,
                 scheme.as_deref(),
-                enc.color.as_ref().and_then(|c| c.effective_title()),
+                legend_title.clone(),
+                legend_orient,
             );
         } else {
             let labels: Vec<(String, String)> = series
@@ -365,7 +391,10 @@ fn render_cartesian(
                 &mut body,
                 &frame,
                 &labels,
-                enc.color.as_ref().and_then(|c| c.effective_title()),
+                legend_title,
+                legend_orient,
+                label_limit,
+                width,
             );
         }
     }
