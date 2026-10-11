@@ -724,22 +724,14 @@ pub(crate) fn render_arc(
         .get("width")
         .and_then(Value::as_f64)
         .unwrap_or(super::DEFAULT_W);
-    let height = spec
+    let base_height = spec
         .get("height")
         .and_then(Value::as_f64)
         .unwrap_or(super::DEFAULT_H);
-    let has_legend = enc.color.as_ref().and_then(|c| c.field.clone()).is_some();
-    let cx = if has_legend {
-        (width - 150.0) / 2.0
-    } else {
-        width / 2.0
-    };
-    let cy = height / 2.0;
-    let radius = (cx.min(cy) - 24.0).max(20.0);
-    let inner = mark_def
-        .inner_radius
-        .map(|r| r.min(radius - 4.0))
-        .unwrap_or(0.0);
+    let legend_orient =
+        super::legend::Orient::parse(enc.color.as_ref().and_then(|c| c.legend_orient.as_deref()));
+    let has_legend = enc.color.as_ref().and_then(|c| c.field.clone()).is_some()
+        && legend_orient != super::legend::Orient::None;
 
     // category = color field (or theta field); value = theta field.
     let theta_field = enc
@@ -769,6 +761,26 @@ pub(crate) fn render_arc(
         }
     }
     let total: f64 = totals.values().sum::<f64>().max(f64::EPSILON);
+    let legend_title = enc.color.as_ref().and_then(|c| c.legend_title());
+    let label_limit = enc.color.as_ref().and_then(|c| c.legend_label_limit);
+    let reserved = if has_legend && legend_orient == super::legend::Orient::Right {
+        super::legend::right_width(&cats, legend_title.as_deref(), width, label_limit)
+    } else {
+        0.0
+    };
+    let height = base_height
+        + if has_legend && legend_orient == super::legend::Orient::Bottom {
+            super::legend::bottom_height(&cats, legend_title.as_deref(), width - 12.0, label_limit)
+        } else {
+            0.0
+        };
+    let cx = (width - reserved) / 2.0;
+    let cy = base_height / 2.0;
+    let radius = (cx.min(cy) - 24.0).max(20.0);
+    let inner = mark_def
+        .inner_radius
+        .map(|r| r.min(radius - 4.0))
+        .unwrap_or(0.0);
 
     let palette = if let Some(range) = enc.color.as_ref().and_then(|c| c.range.clone()) {
         range
@@ -801,9 +813,9 @@ pub(crate) fn render_arc(
     let frame = Frame {
         height,
         plot_x0: 0.0,
-        plot_x1: width - 150.0,
+        plot_x1: width - reserved,
         plot_y0: 24.0,
-        plot_y1: height - 24.0,
+        plot_y1: base_height - 90.0,
     };
     if has_legend {
         let labels: Vec<(String, String)> = cats
@@ -815,7 +827,10 @@ pub(crate) fn render_arc(
             &mut body,
             &frame,
             &labels,
-            enc.color.as_ref().and_then(|c| c.effective_title()),
+            legend_title,
+            legend_orient,
+            label_limit,
+            width,
         );
     }
 
