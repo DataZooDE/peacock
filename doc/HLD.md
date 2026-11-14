@@ -373,14 +373,14 @@ inline data). (BRD §7, §9.)
 |---|---|---|
 | ADR-P1 | **Single static Rust binary + embeddable library crate.** | Decision D-1; matches the Triton/escurel substrate baseline; in-process embedding for Rust agents. |
 | ADR-P2 | **escurel-client is the only data path; no DB driver/credential in peacock.** | Keeps the trust boundary; escurel owns credentials, virtualization, ACL. peacock is pure `(skill, params, rows) → artifact`. |
-| ADR-P3 | **Vega-Lite canonical; vl-convert embedded for PNG/SVG; peacock is the chat rasterizer.** | Declarative/safe/agent-emittable; self-contained Rust rasterizer (no Node/network); satisfies Triton's `render_a2ui_to_png`. |
-| ADR-P4 | **A2UI v0.9 layout + `kind: vega` custom component.** | Separates layout/interaction from graphics via A2UI's sanctioned custom-catalog extension. |
+| ADR-P3 | **anofox-visualization is the chart engine (roles → SVG); Vega-Lite is a derived compatibility output; peacock is the chat rasterizer.** *(Amended 2026-11-14, peacock#44 — supersedes "Vega-Lite canonical; vl-convert".)* | A maintained engine with hundreds of roles, native theming (light/dark/locale) and deterministic pure-Rust SVG replaces a hand-written Vega-Lite subset; every chart is painted, not only the first; Triton's native charts keep working off the derived spec. |
+| ADR-P4 | **A2UI v0.9 layout + `kind: anofox` custom component** (and `kind: dashboard` for a compiled dashboard). | Separates layout/interaction from graphics via A2UI's sanctioned custom-catalog extension. |
 | ADR-P5 | **Flutter-web iframe runtime, CI-built, embedded as static assets.** | Decision D-2; aligns with `escurel_explorer_kit`; runtime stays Rust-only (frontend is build-time only). |
 | ADR-P6 | **peacock is an internal upstream behind Triton's MCP ingress.** | Decision D-3; reuse Triton's TLS/OIDC/Vault/proxy; no public port; identity is the Vault-minted forwarded token. |
 | ADR-P7 | **Stateless re-renders; drill state in params/tokens; no server-side UI session.** | Triton ADR-5; scale-out + reproducible renders. |
-| ADR-P8 | **Render guardrails at composition: inline-data-only, restricted Vega expr, iframe sandbox.** | Stops an agent-authored spec from fetching/computing beyond its rows. |
+| ADR-P8 | **Render guardrails at composition: inline-data-only, known/permitted anofox roles only, inert SVG, iframe sandbox.** | Stops an agent-authored spec from fetching/computing beyond its rows. |
 | ADR-P9 | **One render core; surfaces are thin shells.** | Triton's single-pivot pattern; cross-surface consistency by construction. |
-| ADR-P10 | **ggsql optional, compiled escurel-side; not load-bearing in v1.** | Keeps spec-gen at the DuckDB connection; peacock always consumes Vega-Lite; no alpha dependency on the critical path. |
+| ADR-P10 | **Whole dashboards are compiled at author time into escurel query pages; the render path sends no SQL.** *(Amended 2026-11-14, peacock#44 — supersedes "ggsql optional".)* | anofox's linter gates authoring; each statement becomes a SELECT-only query page over `{{target}}` with bound params; render reads pages by reference and matches anofox's reads by content hash, so the trust boundary holds by construction. |
 | ADR-P11 | **Lean manifest + closed-set boot validation; Vault refs for secrets.** | Triton ADR-13. |
 | ADR-P12 | **Stdout audit; substrate ships it.** | Triton ADR-7; no self-hosted log shipper. |
 | ADR-P13 | **License BSL-1.1 → MPL-2.0 (match escurel).** | Suite consistency; pending OQ-4 confirmation. |

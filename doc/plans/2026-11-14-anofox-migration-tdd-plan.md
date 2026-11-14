@@ -1,6 +1,6 @@
 # TDD plan — migrate the render engine to anofox-visualization (#44)
 
-Status: draft · 2026-11-14 · tracks issue #44
+Status: implemented on `feat/anofox-engine` · 2026-11-14 · tracks issue #44 (see *Implementation status* at the end)
 
 ## Decisions taken
 
@@ -202,3 +202,35 @@ Every journey runs against **real** components: `NorthwindEscurel` / `EscurelPro
 
 - **Teams native chart proof:** the real Teams surface through the `triton` binary (J2b), using `FakeBotFramework` for Microsoft's side.
 - **`author compile` and principle 3:** allowed, but only in `peacock-bin` author tooling. The ACC-2/11 grep is extended so `peacock-core`/`peacock-server` never reference `sql::plan` or format SQL. Reword principle 3 in `CLAUDE.md` to "the **render path** constructs no SQL string; author-time compile in `peacock-bin` rewrites author-supplied SQL into escurel query pages".
+
+## Implementation status
+
+All eight journeys pass against real components: J1–J5 and J8 in `cargo test`, J6 through the real
+`peacock` binary, and J7 through `scripts/verify-ui.sh` in headless Chrome.
+
+Deviations from the plan, and why:
+
+- **No `ChartBackend` trait.** The hard cut leaves one engine, so a trait with a single
+  implementation would be ceremony. The boundary is the `peacock-core::chart` module (and
+  `dashboard` for whole dashboards).
+- **Commit order.** The core hard cut landed together with the anofox view (one commit), not as a
+  separate step 11. Keeping both dialects alive in between would have meant migrating every test
+  twice.
+- **J2 reads Triton's dispatch result.** Triton's MCP surface rebuilds `_meta`, so the PNG, SVG and
+  derived spec are asserted on `POST /v1/tools/render_report`. The Teams path (J2b) reads them the
+  same way inside Triton.
+- **Instance card and Triton KPI tiles.** Both are rendered by anofox (`MARKDOWN` under a `TITLE`
+  bar; `TEXT_LARGE` with a `LABEL`) and laid out by a small grid composer. anofox's single-panel
+  API cannot draw `TABLE`/`RECORD` panels from JSON rows.
+- **Not done: truncation surfacing.** The existing `max_rows` render error still bounds rows, and
+  anofox's `RenderLimits.max_rows` is set to the same 10k.
+
+Still open (non-code or cross-repo):
+
+- Phase 0: alignment with the anofox maintainer, the BUSL-1.1 Additional Use Grant check, and
+  filing the upstream asks (stable API / lean feature, theme registry, `chart.grid`/`chart.axis`,
+  custom-accent contrast checks, an error instead of a silent drop).
+- escurel PR: migrate `demo/seed/skills/supplier-risk-report.md` (`kind: vega`) to `kind: anofox`.
+  Merge it together with this PR.
+- triton follow-up issue: read a neutral `{kind, x, y, series, rows}` chart summary instead of
+  Vega-Lite.

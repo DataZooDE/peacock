@@ -222,25 +222,37 @@ RFC-2119 keywords. The coding agent has discretion on details not pinned.
 
 ### 5.3 Visualization (FR-V)
 
-- **FR-V-1** Charts MUST be specified in **Vega-Lite** and carried as a
-  **custom A2UI v0.9 catalog component** (`kind: vega`). A2UI layout
-  (KPI/table/text/controls) and Vega-Lite graphics MUST stay separable.
-- **FR-V-2** peacock MUST rasterize a chart to PNG/SVG via the embedded
-  **vl-convert** (Rust; no Node, no network) and MUST expose this as the
-  `render_a2ui_to_png` capability Triton's chat surface delegates to.
-- **FR-V-3** For inline rendering, peacock MUST inject the escurel rows
-  into the Vega-Lite spec as inline data; the spec MUST NOT reference a
-  remote data URL.
-- **FR-V-4 (guardrail)** peacock MUST reject or strip any chart spec that
-  (a) loads remote/external data, or (b) uses Vega expression features
-  outside a documented safe subset, so an agent-authored spec cannot
-  fetch or compute beyond its rows. Violations surface as `Render`
-  errors. *(Security; see NFR-S-3.)*
-- **FR-V-5 (optional, deferred)** peacock MAY accept a chart authored as a
-  **ggsql** grammar-of-graphics snippet; when so, compilation to Vega-Lite
-  MUST happen where the DuckDB connection lives (escurel-side), and peacock
-  MUST receive a Vega-Lite spec. ggsql MUST NOT be a load-bearing
-  dependency in v1 (gated on it maturing past alpha). *(See §7, §9.)*
+> **Amended 2026-11-14 (peacock#44).** The chart language is
+> **anofox-visualization roles**; Vega-Lite is a *derived* compatibility
+> output. The original Vega-Lite / vl-convert / ggsql wording is superseded
+> by the requirements below.
+
+- **FR-V-1** Charts MUST be specified as **anofox-visualization role specs**
+  (`roles: [[column, ROLE, name?], …]` over a view's escurel columns) and
+  carried as a **custom A2UI v0.9 catalog component** (`kind: anofox`). A2UI
+  layout (KPI/table/text/controls) and the chart specs MUST stay separable.
+  A report MAY instead carry a whole compiled anofox dashboard (FR-V-5).
+- **FR-V-2** peacock MUST paint every chart to deterministic SVG with the
+  embedded anofox core crate and rasterize it to PNG in-process (resvg,
+  bundled fonts; no Node, no network), and MUST expose the
+  `render_a2ui_to_png` capability Triton's chat surface delegates to. For
+  native-chart consumers (Teams `Chart.*`, Gemini Enterprise `VegaChart`)
+  peacock MUST also emit a minimal **derived Vega-Lite** for chartable
+  panels (bar / line / area / scatter / pie / donut).
+- **FR-V-3** peacock MUST inject the escurel rows into each panel spec as
+  inline data; an authored spec MUST NOT bring its own rows, theme, URL or
+  contract plot.
+- **FR-V-4 (guardrail)** peacock MUST reject any chart spec that names an
+  unknown role, a layout / input / chrome role inside a panel, or a role that
+  fetches or navigates (`LINK`, `IMAGE`, downloads), and MUST check every
+  painted SVG inert (no script, foreign content or remote href). Violations
+  surface as `Render` errors. *(Security; see NFR-S-3.)*
+- **FR-V-5** A report MAY carry a whole anofox `dashboard.sql`, compiled at
+  **author time** (`peacock author compile`) into escurel query pages (one
+  per statement, SELECT-only, `{{target}}` + bound params) after anofox's
+  linter passes as a hard gate. At render peacock sends **no SQL**: it reads
+  the compiled pages by reference and answers anofox's reads by content
+  hash; a compiled panel that is not drawn fails the render.
 
 ### 5.4 MCP-App surface (FR-M)
 

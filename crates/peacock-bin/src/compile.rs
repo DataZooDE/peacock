@@ -109,7 +109,7 @@ pub fn compile(script: &str, opts: &CompileOpts) -> Result<Compiled, Vec<String>
     let mut errors: Vec<String> =
         anofox_visualization::lint::check_opts(script, |_| Ok(Vec::new()), lint_opts)
             .into_iter()
-            .filter(|d| d.severity == Severity::Error && !DATA_DEPENDENT.contains(&&*d.code))
+            .filter(|d| d.severity == Severity::Error && !DATA_DEPENDENT.contains(&d.code))
             .map(|d| format!("statement {}: {}: {}", d.stmt, d.code, d.message))
             .collect();
 
