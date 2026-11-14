@@ -57,6 +57,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/v1/render_report", post(render_report))
         // MCP-Apps JSON-RPC surface (peacock's own host-facing endpoint).
         .route("/mcp", post(crate::mcp::handle))
+        // The `ui://peacock/<report>` runtime, standalone (FR-M-1): the same
+        // page the MCP resource serves, openable in a plain browser.
+        .route("/ui/{report_id}", get(ui_page))
         // Triton upstream contract (GET / serves the demo SPA; POST / is the
         // header-routed Triton dispatch).
         .route("/", get(index).post(crate::upstream::handle));
@@ -115,6 +118,29 @@ async fn version() -> impl IntoResponse {
         "binary_sha": option_env!("PEACOCK_BINARY_SHA").unwrap_or("dev"),
         "bundle_sha": option_env!("PEACOCK_BUNDLE_SHA").unwrap_or("dev"),
     }))
+}
+
+/// `GET /ui/<report>` — the `ui://peacock/<report>` runtime as a page. In a
+/// plain browser it renders through peacock's own HTTP endpoint (no MCP host).
+async fn ui_page(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(report_id): axum::extract::Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> Response {
+    let uri = match query {
+        Some(q) => format!("ui://peacock/{report_id}?{q}"),
+        None => format!("ui://peacock/{report_id}"),
+    };
+    match crate::mcp::resources_read(&state, "", &json!({ "uri": uri })) {
+        Ok(r) => {
+            let html = r["contents"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            axum::response::Html(html).into_response()
+        }
+        Err(e) => error_response(&e),
+    }
 }
 
 async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {

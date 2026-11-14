@@ -40,6 +40,16 @@
   th { color:var(--mut); font-weight:600; text-transform:uppercase; letter-spacing:.3px; font-size:11px; }
   td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
   .muted { color:var(--mut); font-size:12px; }
+  /* The anofox chart, inline: hover a mark for its value, click to drill. */
+  .chart { margin:0 0 12px; background:var(--sfc); border:1px solid var(--bdr);
+           border-radius:var(--rad); padding:8px; overflow-x:auto; }
+  .chart svg { display:block; width:100%; max-width:960px; height:auto; }
+  .chart .gg-mark { cursor:pointer; }
+  .chart .gg-mark:hover { opacity:.82; }
+  .tip { position:fixed; pointer-events:none; z-index:10; font-size:12px;
+         background:var(--txt); color:var(--pk-bg,#fff); padding:4px 8px;
+         border-radius:6px; white-space:nowrap; }
+  .tip[hidden] { display:none; }
   /* Instance-report components (facts / markdown / timeline) — Material cards. */
   .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
   .fact { background:var(--sfc); border:1px solid var(--bdr); border-radius:var(--rad);
@@ -254,6 +264,13 @@ function render(data) {
   params = sc.current_params || params;
   const schema = sc.param_schema || {};
   const png = (data && data._meta && data._meta.png_base64) || sc.png_base64;
+  // The painted anofox charts (`_meta.svgs` from MCP / Triton, `svgs` from the
+  // HTTP endpoint) — server-rendered and checked inert (no script, no
+  // foreign content, no remote href). The PNG is only the fallback.
+  const svgs = (data && data._meta && data._meta.svgs) || (data && data.svgs) || [];
+  const charts = svgs.length
+    ? svgs.map((s, i) => `<figure class="chart" data-chart="${i}">${s}</figure>`).join("")
+    : (png ? `<img alt="chart" src="data:image/png;base64,${png}">` : "");
 
   const parts = [];
 
@@ -292,16 +309,40 @@ function render(data) {
         <div class="kpi"><div class="l">Total ${esc(numeric || "value")}</div><div class="v">${money(total)}</div></div>
         <div class="kpi"><div class="l">Rows</div><div class="v" style="color:#201f1e">${rows.length}</div></div>
       </div>
-      ${png ? `<img alt="chart" src="data:image/png;base64,${png}">` : ""}
+      ${charts}
       ${canDrill ? `<div class="chips">${cats.map(c=>`<span class="chip ${(params.category||'ALL')===c?'on':''}" data-cat="${esc(c)}">${esc(c==='ALL'?'All':c)}</span>`).join("")}</div>` : ""}
       <table><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr>
         ${rows.map(r=>`<tr>${cols.map(c=>`<td>${esc(typeof r[c]==="number"?(+r[c]).toLocaleString("en-US"):r[c])}</td>`).join("")}</tr>`).join("")}</table>`);
+  } else if (charts) {
+    // A compiled dashboard (no row summary of its own) or a chart-only report.
+    parts.push(`<div class="head"><div class="t">${titleize(REPORT_ID)}</div></div>${charts}`);
   } else if (!parts.length) {
     parts.push(`<div class="muted">Nothing to show.</div>`);
   }
 
-  document.getElementById("app").innerHTML = parts.join("");
+  document.getElementById("app").innerHTML = parts.join("") + `<div id="tip" class="tip" role="tooltip" hidden></div>`;
   document.querySelectorAll(".chip").forEach(ch => ch.onclick = () => drill(ch.dataset.cat));
+  // Chart marks: anofox tags each with data-x / data-series / data-fvalue.
+  // Hover shows the value; a click on a series drills the report's
+  // `category` param — a fresh render from the ABSOLUTE param vector.
+  const tip = document.getElementById("tip");
+  const canDrillMarks = !!schema.category;
+  document.querySelectorAll(".chart .gg-mark").forEach(m => {
+    const d = m.dataset;
+    const label = [d.series, d.x].filter(Boolean).join(" · ");
+    m.addEventListener("mouseenter", e => {
+      tip.textContent = `${label}${label ? ": " : ""}${d.fvalue || d.value || ""}`;
+      tip.hidden = false;
+      tip.style.left = (e.clientX + 12) + "px";
+      tip.style.top = (e.clientY + 12) + "px";
+    });
+    m.addEventListener("mousemove", e => {
+      tip.style.left = (e.clientX + 12) + "px";
+      tip.style.top = (e.clientY + 12) + "px";
+    });
+    m.addEventListener("mouseleave", () => { tip.hidden = true; });
+    if (canDrillMarks && d.series) m.addEventListener("click", () => drill(d.series));
+  });
   // Wikilink navigation: any `[[skill::id]]` in a rendered body opens that
   // document in place (a fresh absolute render, like a drill).
   document.querySelectorAll(".wl").forEach(w =>

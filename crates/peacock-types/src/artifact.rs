@@ -60,15 +60,20 @@ pub struct Artifact {
 }
 
 impl Artifact {
-    /// The painted SVG of every chart, in layout order (empty until the
-    /// render step paints them).
+    /// The painted SVG of every chart — and of a whole compiled dashboard —
+    /// in layout order (empty until the render step paints them).
     pub fn chart_svgs(&self) -> Vec<&str> {
         self.a2ui
             .get("components")
             .and_then(Value::as_array)
             .map(|cs| {
                 cs.iter()
-                    .filter(|c| c.get("kind").and_then(Value::as_str) == Some("anofox"))
+                    .filter(|c| {
+                        matches!(
+                            c.get("kind").and_then(Value::as_str),
+                            Some("anofox" | "dashboard")
+                        )
+                    })
                     .filter_map(|c| c.get("svg").and_then(Value::as_str))
                     .collect()
             })

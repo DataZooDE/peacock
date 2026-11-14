@@ -63,10 +63,13 @@ async fn main() {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
 
     // Serve the built Flutter-web client at /app when the bundle exists.
+    // `PEACOCK_DEMO_FLUTTER=0` serves the plain HTML runtime instead (what
+    // `scripts/verify-ui.sh` drives in a browser).
+    let flutter_off = std::env::var("PEACOCK_DEMO_FLUTTER").is_ok_and(|v| v == "0");
     let flutter_dir = {
         let d = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../web/peacock-web/build/web");
-        d.is_dir().then_some(d)
+        (d.is_dir() && !flutter_off).then_some(d)
     };
     // The demo is directly reachable, so its MCP-Apps `ui://` resource uses the
     // Flutter shim pointing at this server's own `/app/`.

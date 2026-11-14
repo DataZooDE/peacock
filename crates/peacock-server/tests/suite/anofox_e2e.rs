@@ -157,3 +157,59 @@ async fn mcp_host_renders_northwind_with_anofox() {
 
     nw.shutdown().await;
 }
+
+/// Phase 5: the `ui://peacock` runtime shows the INTERACTIVE anofox chart —
+/// the painted SVG inline (hover tooltip, click-to-drill on a mark), the PNG
+/// only as a fallback — and peacock serves the same page standalone at
+/// `GET /ui/<report>`, so a browser (or `scripts/verify-ui.sh`) can open it.
+#[tokio::test]
+async fn the_ui_runtime_inlines_the_interactive_chart() {
+    let (nw, base) = start().await;
+
+    let read: Value = reqwest::Client::new()
+        .post(format!("{base}/mcp"))
+        .json(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "resources/read",
+                       "params": { "uri": format!("ui://peacock/{NW_REPORT}") } }),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let html = read["result"]["contents"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // It reads the painted SVGs from the tool result and wires the marks.
+    for hook in ["_meta.svgs", "gg-mark", "data-series", "id=\"tip\""] {
+        assert!(html.contains(hook), "runtime wires `{hook}`");
+    }
+    // The PNG stays a fallback, not the primary picture.
+    assert!(html.contains("png_base64"));
+
+    // The same page, standalone.
+    let page = reqwest::get(format!("{base}/ui/{NW_REPORT}"))
+        .await
+        .unwrap();
+    assert!(page.status().is_success());
+    assert!(
+        page.headers()["content-type"]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html"),
+        "an HTML page"
+    );
+    assert_eq!(
+        page.text().await.unwrap(),
+        html,
+        "the same runtime as the ui:// resource"
+    );
+
+    // An unknown / unsafe id is not served.
+    let bad = reqwest::get(format!("{base}/ui/..%2Fetc")).await.unwrap();
+    assert!(bad.status().is_client_error());
+
+    nw.shutdown().await;
+}
