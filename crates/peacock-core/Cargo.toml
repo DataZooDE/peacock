@@ -20,6 +20,11 @@ ggplot = ["dep:peacock-ggplot"]
 [dependencies]
 peacock-types = { workspace = true }
 peacock-rasterizer = { workspace = true }
+anofox-visualization = { workspace = true }
+peacock-theme = { workspace = true }
+resvg = { workspace = true }
+usvg = { workspace = true }
+tiny-skia = { workspace = true }
 peacock-ggplot = { workspace = true, optional = true }
 escurel-client = { workspace = true }
 escurel-types = { workspace = true }

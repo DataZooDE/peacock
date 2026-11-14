@@ -4,6 +4,7 @@
 //! - `data` — the escurel row reader (FR-D);
 //! - `instance` — the escurel instance-page reader (records, not rows);
 //! - `skill` — the report-skill model + escurel resolution (FR-D-1);
+//! - `chart` — the anofox-visualization chart engine (issue #44);
 //! - `guardrail` — the safe Vega-Lite subset (FR-V-4);
 //! - `compose` — A2UI v0.9 + kind:vega + structuredContent (FR-R-3, FR-V);
 //! - `render` — the orchestration every surface funnels through;
@@ -12,6 +13,7 @@
 
 pub mod author;
 pub mod body_tags;
+pub mod chart;
 pub mod compose;
 pub mod data;
 pub mod guardrail;

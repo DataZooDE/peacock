@@ -19,7 +19,9 @@
 
 use std::collections::BTreeMap;
 
+mod anofox;
 mod registry;
+pub use anofox::{DARK_CARD, Variant, contrast_ratio, lift_to_contrast};
 pub use registry::ThemeRegistry;
 
 /// How a theme's `--pk-logo` is placed by chrome consumers (the chat-card
