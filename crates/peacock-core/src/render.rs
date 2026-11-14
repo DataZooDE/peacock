@@ -117,6 +117,12 @@ where
             .collect(),
     );
 
+    // 3b. A compiled anofox dashboard renders whole (its own reads).
+    if let Some(dash) = &skill.dashboard {
+        return render_dashboard_report(&skill, dash, &absolute, &bound, principal, escurel, opts)
+            .await;
+    }
+
     // 4. Read each referenced view with the params bound (escurel binds them
     //    as prepared-statement parameters; peacock builds no SQL).
     let mut rows: BTreeMap<String, RowSet> = BTreeMap::new();
@@ -177,6 +183,59 @@ where
     paint(&mut artifact, &skill, &pages, opts)?;
 
     Ok(artifact)
+}
+
+/// Render a report that carries a compiled anofox dashboard: one `dashboard`
+/// component holding the whole painted dashboard, plus the PNG when asked.
+async fn render_dashboard_report<E: ReportData>(
+    skill: &crate::skill::ReportSkill,
+    dash: &crate::dashboard::DashboardSpec,
+    absolute: &BTreeMap<String, peacock_types::ParamValue>,
+    bound: &Value,
+    principal: &Principal,
+    escurel: &E,
+    opts: &RenderOpts,
+) -> Result<Artifact> {
+    let look = crate::chart::ChartLook {
+        theme: opts.theme.clone(),
+        variant: opts.variant,
+        locale: opts.locale.clone(),
+    };
+    let painted = crate::dashboard::render_dashboard(
+        dash,
+        bound,
+        principal,
+        escurel,
+        &look,
+        opts.trace.as_ref(),
+    )
+    .await?;
+    let png = match opts.png_scale {
+        Some(scale) => Some(crate::chart::svg_to_png_on(&painted.svg, scale, &look)?),
+        None => None,
+    };
+    let mut components = vec![json!({
+        "kind": "dashboard",
+        "svg": painted.svg,
+        "panels": painted.panels,
+    })];
+    if !skill.narrative.trim().is_empty() {
+        components.push(json!({ "kind": "text", "value": skill.narrative.trim() }));
+    }
+    Ok(Artifact {
+        a2ui: json!({ "version": "0.9", "components": components }),
+        vega_specs: Vec::new(),
+        anofox_specs: Vec::new(),
+        structured_content: peacock_types::StructuredContent {
+            rows: painted.primary_rows,
+            param_schema: serde_json::to_value(&skill.params).unwrap_or(Value::Null),
+            current_params: crate::dashboard::bound_params(absolute),
+            instances: None,
+            document: None,
+        },
+        pngs: png.iter().cloned().collect(),
+        png,
+    })
 }
 
 /// Paint the artifact in place: render each `kind: anofox` component's SVG
@@ -337,6 +396,7 @@ where
         instances,
         views,
         specs: BTreeMap::new(),
+        dashboard: None,
         narrative: String::new(),
         viewer: None,
         actions: Vec::new(),

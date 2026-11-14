@@ -576,3 +576,34 @@ impl NorthwindEscurel {
         self.process.shutdown().await;
     }
 }
+
+/// The Northwind 1997 revenue **dashboard** as an anofox `dashboard.sql`
+/// (issue #44): a heading, a revenue KPI, revenue per month stacked by
+/// category, and the category share as a donut — over the `order_lines`
+/// source table, `from`/`to` read with `getvariable(...)`. `peacock author
+/// compile` turns each statement into an escurel query page over
+/// [`NW_DASHBOARD_TARGET`].
+pub fn northwind_dashboard_sql() -> String {
+    r#"-- Northwind revenue 1997 (EMEA), as an anofox dashboard.
+SELECT 'Northwind revenue (EMEA)'::LABEL;
+
+SELECT sum(unit_price * quantity * (1 - discount)) AS "Revenue"::KPI
+FROM order_lines
+WHERE order_date BETWEEN getvariable('from') AND getvariable('to');
+
+SELECT date_trunc('month', order_date)::XAXIS, category::CATEGORY,
+       sum(unit_price * quantity * (1 - discount)) AS "Revenue"::BARCHART_STACKED
+FROM order_lines
+WHERE order_date BETWEEN getvariable('from') AND getvariable('to')
+GROUP BY ALL ORDER BY 1, 2;
+
+SELECT category::CATEGORY, sum(unit_price * quantity * (1 - discount)) AS "Revenue"::DONUT
+FROM order_lines
+WHERE order_date BETWEEN getvariable('from') AND getvariable('to')
+GROUP BY ALL ORDER BY 2 DESC;
+"#
+    .to_owned()
+}
+
+/// The managed view the compiled dashboard's query pages read (`{{target}}`).
+pub const NW_DASHBOARD_TARGET: &str = "[[nw_order_lines::eu]]";

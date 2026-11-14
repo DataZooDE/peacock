@@ -1,5 +1,6 @@
-//! The `peacock author` subcommand: scaffold, validate, and preview report
-//! skills (BRD §7 authoring-tooling deferral; HLD §170 authoring preview).
+//! The `peacock author` subcommand: scaffold, validate, preview and compile
+//! report skills (BRD §7 authoring-tooling deferral; HLD §170 authoring
+//! preview; `compile` — anofox dashboards → escurel pages, issue #44).
 //!
 //! All three reuse peacock-core — there is no second parser or guardrail here:
 //! - `validate` and `scaffold` are pure (no escurel, no credential);
@@ -51,12 +52,42 @@ pub enum AuthorCmd {
         #[arg(long)]
         params: Option<String>,
     },
+    /// Compile an anofox `dashboard.sql` into escurel pages: one query page
+    /// per statement plus the report skill. Lints first (a hard gate).
+    Compile {
+        /// Path to the `dashboard.sql`.
+        file: String,
+        /// The report id (also the query pages' id prefix).
+        #[arg(long)]
+        report: String,
+        /// The table the script reads; it becomes the query pages' `{{target}}`.
+        #[arg(long)]
+        source: String,
+        /// The managed view wikilink the query pages read, e.g. `[[orders::eu]]`.
+        #[arg(long)]
+        target: String,
+        /// A param the script reads with `getvariable`, as `name:type=default`
+        /// (repeatable).
+        #[arg(long = "param")]
+        params: Vec<String>,
+        /// Output directory (`<report>.md` + `query/<id>.md`).
+        #[arg(long)]
+        out: std::path::PathBuf,
+    },
 }
 
 /// Run an `author` subcommand, returning the process exit code.
 pub async fn run(cmd: AuthorCmd) -> i32 {
     match cmd {
         AuthorCmd::Validate { file } => validate(&file),
+        AuthorCmd::Compile {
+            file,
+            report,
+            source,
+            target,
+            params,
+            out,
+        } => compile(&file, &report, &source, &target, &params, &out),
         AuthorCmd::Scaffold { report_id } => {
             print!("{}", scaffold(&report_id));
             0
@@ -80,6 +111,64 @@ pub async fn run(cmd: AuthorCmd) -> i32 {
                 params.as_deref(),
             )
             .await
+        }
+    }
+}
+
+/// `peacock author compile <dashboard.sql> …` — lint, plan and emit the pages.
+fn compile(
+    file: &str,
+    report: &str,
+    source: &str,
+    target: &str,
+    params: &[String],
+    out: &std::path::Path,
+) -> i32 {
+    let script = match std::fs::read_to_string(file) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("author: cannot read {file}: {e}");
+            return 1;
+        }
+    };
+    let params: Vec<crate::compile::ParamDecl> = match params
+        .iter()
+        .map(|p| crate::compile::ParamDecl::parse(p))
+        .collect()
+    {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("author: {e}");
+            return 1;
+        }
+    };
+    let opts = crate::compile::CompileOpts {
+        report,
+        source,
+        target,
+        params: &params,
+    };
+    match crate::compile::compile(&script, &opts) {
+        Ok(compiled) => {
+            if let Err(e) = crate::compile::write(&compiled, out) {
+                eprintln!("author: cannot write {}: {e}", out.display());
+                return 1;
+            }
+            println!(
+                "{file}: compiled {} statement(s) → {}/{report}.md + {} query page(s) under {}/query/",
+                compiled.queries.len(),
+                out.display(),
+                compiled.queries.len(),
+                out.display()
+            );
+            0
+        }
+        Err(errors) => {
+            eprintln!("{file}: {} problem(s):", errors.len());
+            for e in &errors {
+                eprintln!("  {e}");
+            }
+            1
         }
     }
 }

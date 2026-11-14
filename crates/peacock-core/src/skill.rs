@@ -202,6 +202,10 @@ pub struct ReportSkill {
     /// Named anofox chart specs (`{ roles, title?, … }`) the chart views
     /// reference.
     pub specs: std::collections::BTreeMap<String, Value>,
+    /// A compiled anofox dashboard (`dashboard:` frontmatter, emitted by
+    /// `peacock author compile`). When set, the report renders the whole
+    /// dashboard instead of `views:`.
+    pub dashboard: Option<crate::dashboard::DashboardSpec>,
     /// The agent-authored narrative (skill body).
     pub narrative: String,
     /// `viewer:` — set on an INSTANCE skill page (account, email, …), read
@@ -275,6 +279,7 @@ impl ReportSkill {
         let viewer = parse_viewer(id, fm)?;
         let actions = parse_actions(id, fm)?;
         let followups = parse_followups(id, fm)?;
+        let dashboard = crate::dashboard::DashboardSpec::from_frontmatter(id, fm)?;
 
         Ok(ReportSkill {
             id: id.to_owned(),
@@ -283,6 +288,7 @@ impl ReportSkill {
             instances,
             views,
             specs,
+            dashboard,
             narrative: body.to_owned(),
             viewer,
             actions,

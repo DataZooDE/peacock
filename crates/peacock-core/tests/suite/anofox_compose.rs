@@ -55,6 +55,7 @@ fn skill(views: Vec<ViewSpec>) -> ReportSkill {
                 json!({ "roles": [["revenue", "HISTOGRAM"]] }),
             ),
         ]),
+        dashboard: None,
         narrative: String::new(),
         viewer: None,
         actions: Vec::new(),

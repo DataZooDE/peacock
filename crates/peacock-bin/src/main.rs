@@ -6,6 +6,7 @@
 //! token would be exchanged per request.
 
 mod author;
+mod compile;
 mod manifest;
 
 use std::sync::Arc;
