@@ -220,8 +220,17 @@ async fn render_document_html(
 /// refused rather than shipped.
 const MAX_PNG_BYTES: usize = 2 * 1024 * 1024;
 
+/// Triton's KPI dashboard (`{title, tiles: [{label, value, trend?}]}`).
+#[derive(serde::Deserialize)]
+struct DashboardRequest {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    tiles: Vec<peacock_core::chart::Tile>,
+}
+
 fn render_a2ui_to_png(state: &AppState, args: Value) -> Response {
-    let req: peacock_rasterizer::DashboardRequest = match serde_json::from_value(args) {
+    let req: DashboardRequest = match serde_json::from_value(args) {
         Ok(r) => r,
         Err(e) => {
             return (
@@ -231,7 +240,14 @@ fn render_a2ui_to_png(state: &AppState, args: Value) -> Response {
                 .into_response();
         }
     };
-    match peacock_rasterizer::render_dashboard_to_png(&req, state.png_scale) {
+    // The deployment's own look (its tenant brand), painted by anofox.
+    let look = peacock_core::chart::ChartLook {
+        theme: Some(state.themes.resolve(&state.principal.tenant, "").tokens),
+        ..Default::default()
+    };
+    let png = peacock_core::chart::kpi_tiles_svg(&req.title, &req.tiles, &look)
+        .and_then(|svg| peacock_core::chart::svg_to_png_on(&svg, state.png_scale, &look));
+    match png {
         Ok(png) if png.len() <= MAX_PNG_BYTES => {
             let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
             Json(json!({ "png_base64": b64 })).into_response()

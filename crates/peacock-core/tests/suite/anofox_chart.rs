@@ -310,3 +310,69 @@ fn image_corner(png: &[u8]) -> (u8, u8, u8, u8) {
     let c = p.pixel(0, 0).unwrap().demultiply();
     (c.red(), c.green(), c.blue(), c.alpha())
 }
+
+// ── non-chart images: KPI tiles (Triton's dashboard) and the instance card ──
+
+#[test]
+fn kpi_tiles_render_each_tile_with_its_label() {
+    let tiles = vec![
+        chart::Tile {
+            label: "Total revenue".into(),
+            value: "$2,986".into(),
+            trend: Some("+12%".into()),
+        },
+        chart::Tile {
+            label: "Categories".into(),
+            value: "5".into(),
+            trend: None,
+        },
+    ];
+    let svg = chart::kpi_tiles_svg("Northwind revenue", &tiles, &ChartLook::default()).unwrap();
+    for text in [
+        "Northwind revenue",
+        "$2,986",
+        "Total revenue",
+        "+12%",
+        "Categories",
+    ] {
+        assert!(
+            svg.contains(&text.replace('&', "&amp;")),
+            "{text} in the tiles"
+        );
+    }
+    chart::check_inert(&svg).unwrap();
+    let png = chart::svg_to_png_on(&svg, 1.0, &ChartLook::default()).unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+}
+
+#[test]
+fn instance_card_shows_title_facts_body_and_activity() {
+    let card = chart::InstanceCard {
+        title: "Beverages GmbH".into(),
+        subtitle: "account · beverages-gmbh".into(),
+        facts: vec![
+            ("status".into(), "active".into()),
+            ("owner".into(), "Alice".into()),
+        ],
+        body_lines: vec!["Key account in Hamburg.".into()],
+        events: vec![("Email filed".into(), "mail · Renewal question".into())],
+    };
+    let svg = chart::instance_card_svg(&card, &ChartLook::default()).unwrap();
+    for text in [
+        "Beverages GmbH",
+        "status",
+        "active",
+        "Key account in Hamburg.",
+        "Email filed",
+    ] {
+        assert!(svg.contains(text), "{text} on the card");
+    }
+    chart::check_inert(&svg).unwrap();
+    // Untrusted page content is escaped, never markup.
+    let evil = chart::InstanceCard {
+        title: "<script>x</script>".into(),
+        ..card
+    };
+    let svg = chart::instance_card_svg(&evil, &ChartLook::default()).unwrap();
+    assert!(!svg.contains("<script"), "escaped");
+}

@@ -3136,7 +3136,6 @@ dependencies = [
  "clap",
  "escurel-client",
  "peacock-core",
- "peacock-rasterizer",
  "peacock-server",
  "peacock-test-support",
  "peacock-theme",
@@ -3161,7 +3160,6 @@ dependencies = [
  "escurel-client",
  "escurel-test-support",
  "escurel-types",
- "peacock-rasterizer",
  "peacock-test-support",
  "peacock-theme",
  "peacock-types",
@@ -3184,28 +3182,12 @@ name = "peacock-demo"
 version = "0.1.0"
 dependencies = [
  "peacock-core",
- "peacock-rasterizer",
  "peacock-server",
  "peacock-test-support",
  "peacock-theme",
  "tokio",
  "tracing-subscriber",
  "triton-tests",
-]
-
-[[package]]
-name = "peacock-rasterizer"
-version = "0.1.0"
-dependencies = [
- "peacock-theme",
- "peacock-types",
- "resvg",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tiny-skia 0.12.0",
- "ttf-parser",
- "usvg",
 ]
 
 [[package]]
@@ -3217,7 +3199,6 @@ dependencies = [
  "escurel-client",
  "escurel-test-support",
  "peacock-core",
- "peacock-rasterizer",
  "peacock-test-support",
  "peacock-theme",
  "peacock-types",

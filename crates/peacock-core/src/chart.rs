@@ -561,3 +561,197 @@ fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
     let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
     Some((p(0)?, p(2)?, p(4)?))
 }
+
+// ── non-chart images: KPI tiles and the instance card ──────────────────────
+
+/// One KPI tile of Triton's `render_a2ui_to_png` dashboard.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct Tile {
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub value: String,
+    #[serde(default)]
+    pub trend: Option<String>,
+}
+
+/// A chartless instance report's preview: the record's title, facts, body and
+/// recent activity.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InstanceCard {
+    pub title: String,
+    pub subtitle: String,
+    pub facts: Vec<(String, String)>,
+    pub body_lines: Vec<String>,
+    pub events: Vec<(String, String)>,
+}
+
+const TILE_W: u64 = 280;
+const TILE_H: u64 = 110;
+
+/// Triton's KPI dashboard as anofox `TEXT_LARGE` tiles (each captioned with a
+/// `LABEL`), three per row under the dashboard title.
+pub fn kpi_tiles_svg(title: &str, tiles: &[Tile], look: &ChartLook) -> Result<String> {
+    let panels = tiles
+        .iter()
+        .map(|t| {
+            let caption = match &t.trend {
+                Some(tr) if !tr.is_empty() => format!("{} · {tr}", t.label),
+                _ => t.label.clone(),
+            };
+            let spec = json!({
+                "rows": [{ "c0": t.value, "c1": caption }],
+                "roles": [[0, "TEXT_LARGE", ""], [1, "LABEL", ""]],
+                "width": TILE_W,
+                "height": TILE_H,
+            });
+            render_svg(&spec, look)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(grid_svg(Some(title), &panels, 3, look))
+}
+
+/// The instance card as one anofox `MARKDOWN` panel under a `TITLE` bar.
+/// Every value is page content (untrusted): anofox escapes it into SVG text.
+pub fn instance_card_svg(card: &InstanceCard, look: &ChartLook) -> Result<String> {
+    // Markdown structure characters in page content would be interpreted;
+    // keep each fact/event on its own list line and strip leading markers.
+    let clean = |s: &str| {
+        s.trim()
+            .trim_start_matches(['#', '-', '*', '>'])
+            .trim()
+            .to_owned()
+    };
+    let mut md = Vec::new();
+    if !card.subtitle.is_empty() {
+        md.push(clean(&card.subtitle));
+        md.push(String::new());
+    }
+    for (k, v) in &card.facts {
+        md.push(format!("- {}: {}", clean(k), clean(v)));
+    }
+    if !card.body_lines.is_empty() {
+        md.push(String::new());
+        md.extend(card.body_lines.iter().map(|l| clean(l)));
+    }
+    if !card.events.is_empty() {
+        md.push(String::new());
+        md.push("Activity".to_owned());
+        for (t, meta) in &card.events {
+            md.push(format!("- {} · {}", clean(t), clean(meta)));
+        }
+    }
+    let lines = md.len() as u64;
+    let spec = json!({
+        "rows": [{ "c0": md.join("\n"), "c1": clean(&card.title) }],
+        "roles": [[0, "MARKDOWN", ""], [1, "TITLE", ""]],
+        "width": 720,
+        "height": (60 + lines * 20).min(2000),
+    });
+    let panel = render_svg(&spec, look)?;
+    Ok(grid_svg(None, &[panel], 1, look))
+}
+
+/// Lay rendered panels out as cards on a page in `columns` columns, with an
+/// optional page title. Each panel is nested as its own `<svg>`, so its
+/// coordinates stay its own.
+fn grid_svg(title: Option<&str>, panels: &[String], columns: usize, look: &ChartLook) -> String {
+    const PAD: u64 = 16;
+    const GAP: u64 = 12;
+    let (bg, card, line, ink) = page_colours(look);
+    let dims: Vec<(u64, u64)> = panels.iter().map(|p| svg_size(p)).collect();
+    let columns = columns.max(1).min(panels.len().max(1));
+    let col_w = dims.iter().map(|d| d.0).max().unwrap_or(TILE_W);
+    let title_h = if title.is_some() { 40 } else { 0 };
+    let mut rows_h = Vec::new();
+    for chunk in dims.chunks(columns) {
+        rows_h.push(chunk.iter().map(|d| d.1).max().unwrap_or(0) + 2 * PAD);
+    }
+    let w = 2 * PAD + columns as u64 * (col_w + 2 * PAD) + (columns as u64 - 1) * GAP;
+    let h = 2 * PAD
+        + title_h
+        + rows_h.iter().sum::<u64>()
+        + rows_h.len().saturating_sub(1) as u64 * GAP;
+    let mut out = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}"><rect width="{w}" height="{h}" fill="{bg}"/>"#
+    );
+    if let Some(t) = title {
+        out.push_str(&format!(
+            r#"<text x="{PAD}" y="{}" font-family="Hanken Grotesk, sans-serif" font-size="18" font-weight="600" fill="{ink}">{}</text>"#,
+            PAD + 20,
+            escape_xml(t)
+        ));
+    }
+    let mut y = PAD + title_h;
+    for (r, chunk) in panels.chunks(columns).enumerate() {
+        for (c, panel) in chunk.iter().enumerate() {
+            let x = PAD + c as u64 * (col_w + 2 * PAD + GAP);
+            out.push_str(&format!(
+                r#"<rect x="{x}" y="{y}" width="{}" height="{}" rx="10" fill="{card}" stroke="{line}"/>"#,
+                col_w + 2 * PAD,
+                rows_h[r]
+            ));
+            out.push_str(&nest(panel, x + PAD, y + PAD));
+        }
+        y += rows_h[r] + GAP;
+    }
+    out.push_str("</svg>");
+    out
+}
+
+/// The page background, card, hairline and ink colours of a look.
+fn page_colours(look: &ChartLook) -> (String, String, String, String) {
+    match look.variant {
+        Variant::Dark => (
+            "#0a0a0a".into(),
+            peacock_theme::DARK_CARD.into(),
+            "#262626".into(),
+            "#ededed".into(),
+        ),
+        Variant::Light => match &look.theme {
+            Some(t) => (
+                t.bg.clone(),
+                t.surface.clone(),
+                t.border.clone(),
+                t.text.clone(),
+            ),
+            None => (
+                "#f4f6f9".into(),
+                "#ffffff".into(),
+                "#e5e7eb".into(),
+                "#1f2937".into(),
+            ),
+        },
+    }
+}
+
+/// Re-root a panel `<svg …>` at `(x, y)` inside another SVG.
+fn nest(panel: &str, x: u64, y: u64) -> String {
+    match panel.find("<svg") {
+        Some(i) => format!("{}<svg x=\"{x}\" y=\"{y}\"{}", &panel[..i], &panel[i + 4..]),
+        None => String::new(),
+    }
+}
+
+/// The `width`/`height` attributes of an SVG's root element.
+fn svg_size(svg: &str) -> (u64, u64) {
+    let head = &svg[..svg.find('>').unwrap_or(svg.len())];
+    let attr = |name: &str| {
+        let key = format!(" {name}=\"");
+        head.find(&key).and_then(|i| {
+            let rest = &head[i + key.len()..];
+            rest[..rest.find('"')?].parse::<f64>().ok()
+        })
+    };
+    (
+        attr("width").unwrap_or(TILE_W as f64) as u64,
+        attr("height").unwrap_or(TILE_H as f64) as u64,
+    )
+}
+
+fn escape_xml(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}

@@ -19,7 +19,6 @@ peacock-types = { workspace = true }
 peacock-core = { workspace = true }
 peacock-theme = { workspace = true }
 peacock-server = { workspace = true }
-peacock-rasterizer = { workspace = true }
 anofox-visualization = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

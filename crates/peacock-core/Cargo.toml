@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 peacock-types = { workspace = true }
-peacock-rasterizer = { workspace = true }
 anofox-visualization = { workspace = true }
 peacock-theme = { workspace = true }
 resvg = { workspace = true }

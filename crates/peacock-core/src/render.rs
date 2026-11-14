@@ -276,15 +276,10 @@ fn paint(
 
     if artifact.png.is_none()
         && let Some(scale) = opts.png_scale
-        && let Some(req) = instance_card_request(skill, pages)
+        && let Some(card) = instance_card_request(skill, pages)
     {
-        let png = match &opts.theme {
-            Some(theme) => {
-                peacock_rasterizer::render_instance_card_to_png_themed(&req, scale, theme)?
-            }
-            None => peacock_rasterizer::render_instance_card_to_png(&req, scale)?,
-        };
-        artifact.png = Some(png);
+        let svg = crate::chart::instance_card_svg(&card, &look)?;
+        artifact.png = Some(crate::chart::svg_to_png_on(&svg, scale, &look)?);
     }
     Ok(())
 }
@@ -572,7 +567,7 @@ pub(crate) fn substitute_template(template: &str, page: &InstancePage) -> Result
 fn instance_card_request(
     skill: &crate::skill::ReportSkill,
     pages: &BTreeMap<String, InstancePage>,
-) -> Option<peacock_rasterizer::InstanceCardRequest> {
+) -> Option<crate::chart::InstanceCard> {
     use crate::skill::ViewSpec;
 
     let (alias, page) = skill
@@ -585,7 +580,7 @@ fn instance_card_request(
         Value::String(s) => s.clone(),
         other => other.to_string(),
     };
-    let mut req = peacock_rasterizer::InstanceCardRequest {
+    let mut req = crate::chart::InstanceCard {
         title: page
             .frontmatter
             .get("name")

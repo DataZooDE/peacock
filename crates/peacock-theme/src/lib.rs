@@ -14,8 +14,9 @@
 //! ```
 //!
 //! Brand CSS is small and **agent-authorable** (a styling agent emits the
-//! `--pk-*` declarations — e.g. from a logo via the palette extractor in
-//! `peacock-rasterizer`); peacock applies it deterministically.
+//! `--pk-*` declarations); peacock applies it deterministically — to the web
+//! chrome natively, and to the charts through the anofox theme bridge
+//! ([`ThemeTokens::to_anofox_json`]).
 
 use std::collections::BTreeMap;
 

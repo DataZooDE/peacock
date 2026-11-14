@@ -4,7 +4,6 @@ members = [
     "crates/peacock-types",
     "crates/peacock-theme",
     "crates/peacock-core",
-    "crates/peacock-rasterizer",
     "crates/peacock-server",
     "crates/peacock-bin",
     "crates/peacock-test-support",
@@ -29,7 +28,6 @@ unused_must_use = "deny"
 peacock-types = { path = "crates/peacock-types" }
 peacock-theme = { path = "crates/peacock-theme" }
 peacock-core = { path = "crates/peacock-core" }
-peacock-rasterizer = { path = "crates/peacock-rasterizer" }
 peacock-server = { path = "crates/peacock-server" }
 
 # Shared third-party (versions aligned with escurel/triton workspaces)
@@ -50,8 +48,8 @@ async-trait = "0.1"
 secrecy = "0.10"
 tempfile = "3"
 toml = "0.8"
-# Pure-Rust SVG → PNG (no Node, no network, NFR-S-5). peacock renders its
-# guardrail-restricted Vega-Lite subset to SVG itself, then rasterizes here.
+# Pure-Rust SVG → PNG (no Node, no network, NFR-S-5): anofox paints the SVG,
+# peacock rasterizes it here with bundled fonts.
 resvg = "0.47"
 usvg = "0.47"
 tiny-skia = "0.12"
