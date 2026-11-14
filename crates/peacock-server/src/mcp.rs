@@ -83,7 +83,15 @@ fn tools_list() -> Value {
             "type": "object",
             "properties": {
                 "report_id": { "type": "string" },
-                "params": { "type": "object" }
+                "params": { "type": "object" },
+                "variant": {
+                    "type": "string", "enum": ["light", "dark"],
+                    "description": "Chart colour variant; use dark in a dark client."
+                },
+                "locale": {
+                    "type": "string",
+                    "description": "Number/date locale for the charts, e.g. de-DE."
+                }
             },
             "required": ["report_id"]
         }
@@ -139,9 +147,12 @@ async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Valu
     // rasterized chart / instance card carries the resolved corporate
     // identity ⊕ host look. Unknown names resolve to the stock palette.
     let theme = state.themes.resolve(&state.principal.tenant, host);
+    let (variant, locale) = look_args(&args)?;
     let opts = RenderOpts {
         png_scale: Some(state.png_scale),
         theme: Some(theme.tokens),
+        variant,
+        locale,
         ..Default::default()
     };
     let art = render(
@@ -154,6 +165,16 @@ async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Valu
     .await?;
 
     Ok(tool_result(report_id, &report_params, &art))
+}
+
+/// The `render_report` look arguments (`variant`, `locale`), validated.
+pub(crate) fn look_args(
+    args: &Value,
+) -> Result<(peacock_core::chart::Variant, Option<String>), Error> {
+    peacock_core::chart::parse_look_args(
+        args.get("variant").and_then(Value::as_str),
+        args.get("locale").and_then(Value::as_str),
+    )
 }
 
 /// `tools/call emit_document_event` → validate the named action against the
@@ -215,11 +236,14 @@ pub fn tool_result(report_id: &str, caller_params: &Value, art: &Artifact) -> Va
         "_meta": {
             "ui": ui_meta(report_id, caller_params, widget_csp_origin().as_deref()),
             "png_base64": png_b64,
-            // The composed Vega-Lite chart specs (rows injected inline), so a
-            // caller that can render a NATIVE interactive chart — e.g. Gemini
-            // Enterprise's A2UI `VegaChart` — uses the spec instead of the
-            // rasterized PNG. Empty for report views with no chart (KPI/table).
+            // Minimal Vega-Lite DERIVED from the chartable anofox panels
+            // (rows inline), so a caller that renders a NATIVE chart — Gemini
+            // Enterprise's A2UI `VegaChart`, Teams `Chart.*` — uses it instead
+            // of the PNG. Empty when no chart has a minimal Vega-Lite form.
             "vega_specs": art.vega_specs,
+            // The painted anofox SVG of every chart, in layout order — what
+            // the ui:// iframe shows.
+            "svgs": art.chart_svgs(),
         }
     })
 }

@@ -269,9 +269,21 @@ async fn render_report_tool(
     // Apply styling on the Triton-dispatched path too: the PNG (chart or
     // instance card) carries the resolved corporate identity ⊕ host look.
     let theme = state.themes.resolve(&principal.tenant, host);
+    let (variant, locale) = match crate::mcp::look_args(&args) {
+        Ok(look) => look,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": e.kind(), "message": e.to_string() })),
+            )
+                .into_response();
+        }
+    };
     let opts = RenderOpts {
         png_scale: Some(state.png_scale),
         theme: Some(theme.tokens),
+        variant,
+        locale,
         ..Default::default()
     };
     match render(&report_id, &report_params, principal, &state.escurel, &opts).await {
@@ -311,7 +323,7 @@ mod request_principal_tests {
             demo_html: "",
             flutter_dir: None,
             flutter_app_url: None,
-            themes: peacock_rasterizer::ThemeRegistry::builtin(),
+            themes: peacock_theme::ThemeRegistry::builtin(),
             triton_url: None,
             upstream_capture: Default::default(),
         })

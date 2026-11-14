@@ -17,7 +17,7 @@ async fn start() -> (NorthwindEscurel, String) {
         demo_html: "<!doctype html><title>peacock demo</title>",
         flutter_dir: None,
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });
@@ -168,7 +168,7 @@ async fn start_with_flutter() -> (NorthwindEscurel, String, tempfile::TempDir) {
         demo_html: "<!doctype html><title>peacock demo</title>",
         flutter_dir: Some(dir.path().to_path_buf()),
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });

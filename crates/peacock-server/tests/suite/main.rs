@@ -17,6 +17,7 @@
 //! `tests/suite.rs`. A test target's root file resolves `mod x;` against
 //! its *own* directory, so `tests/suite.rs` would look for `tests/x.rs`.
 
+mod anofox_e2e;
 mod http_surface;
 mod mcp_surface;
 mod parity;

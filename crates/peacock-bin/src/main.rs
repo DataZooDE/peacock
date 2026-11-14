@@ -133,7 +133,7 @@ async fn run(s: Settings) -> Result<(), String> {
     // under the tenant so every resolve site (PNG, iframe, get_theme) finds
     // it. An unreadable path is a fatal, named boot failure (ACC-10) — a
     // deployment that configures a brand must actually get it.
-    let mut themes = peacock_rasterizer::ThemeRegistry::builtin();
+    let mut themes = peacock_theme::ThemeRegistry::builtin();
     if let Some(path) = &s.brand_css {
         let css = std::fs::read_to_string(path)
             .map_err(|e| format!("reading PEACOCK_BRAND_CSS {path}: {e}"))?;

@@ -264,6 +264,37 @@ pub fn panel_spec(spec: &Value, rs: &RowSet) -> Result<Value> {
     Ok(panel)
 }
 
+/// Parse the caller-facing look knobs (`variant`, `locale`) a surface
+/// receives. An unknown variant or locale is a validation error — never a
+/// silent fall back to the light, `en-US` picture.
+pub fn parse_look_args(
+    variant: Option<&str>,
+    locale: Option<&str>,
+) -> Result<(Variant, Option<String>)> {
+    let v = match variant.map(str::trim) {
+        None | Some("") | Some("light") => Variant::Light,
+        Some("dark") => Variant::Dark,
+        Some(other) => {
+            return Err(Error::validation(format!(
+                "`variant` must be \"light\" or \"dark\", got {other:?}"
+            )));
+        }
+    };
+    let l = match locale.map(str::trim).filter(|s| !s.is_empty()) {
+        None => None,
+        Some(tag) => {
+            if anofox_visualization::format::Locale::from_tag(tag).is_none() {
+                return Err(Error::validation(format!(
+                    "unknown `locale` {tag:?} (known: {})",
+                    anofox_visualization::format::Locale::TAGS.join(", ")
+                )));
+            }
+            Some(tag.to_owned())
+        }
+    };
+    Ok((v, l))
+}
+
 /// The anofox panel spec with the look applied (theme object, variant,
 /// locale) — exactly the JSON handed to the renderer.
 pub fn themed_spec(panel: &Value, look: &ChartLook) -> Value {
