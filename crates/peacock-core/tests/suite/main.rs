@@ -18,6 +18,7 @@
 //! its *own* directory, so `tests/suite.rs` would look for `tests/x.rs`.
 
 mod anofox_chart;
+mod anofox_compose;
 mod compose_unit;
 mod data_northwind;
 mod document_view;
@@ -31,7 +32,4 @@ mod render_northwind;
 mod salesperson_leaderboard;
 mod saved_instances;
 mod shared_selection;
-mod stat_compose;
-mod stat_render_feature_off;
-mod stat_render_ggplot;
 mod supplier_lead_time;

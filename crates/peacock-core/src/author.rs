@@ -5,7 +5,7 @@
 //! (`params` / `data` / `views` / `specs`) + a narrative body — and publishes
 //! it to escurel. This module lets them catch errors *before* publishing, by
 //! reusing peacock's **own** parser ([`ReportSkill::from_frontmatter`]) and the
-//! render guardrail ([`crate::guardrail::check_vega_spec`]) so the rules the
+//! chart guardrail ([`crate::chart::check_spec_shape`]) so the rules the
 //! renderer enforces are the rules the author is checked against — no second,
 //! drifting implementation.
 //!
@@ -23,7 +23,6 @@
 
 use serde_json::Value;
 
-use crate::guardrail::check_vega_spec;
 use crate::skill::{ReportSkill, ViewSpec};
 
 /// One author-facing problem, with the 1-based source line it can be located
@@ -155,7 +154,7 @@ pub fn parse_skill_markdown(text: &str) -> Result<ReportSkill, AuthorError> {
 /// found (empty ⇒ valid). The checks, in order:
 ///
 /// 1. front-matter split + parse via [`ReportSkill::from_frontmatter`];
-/// 2. the inline-data-only Vega-Lite guardrail against each named spec;
+/// 2. the anofox chart-spec guardrail against each named spec;
 /// 3. cross-references: every `data:` alias is used by some view, every view's
 ///    `data` names a declared alias, and every view `spec` / `spec_single`
 ///    exists in `specs:`;
@@ -186,21 +185,11 @@ pub fn validate_skill_markdown(text: &str) -> Vec<AuthorError> {
 
     let mut errors = Vec::new();
 
-    // 2. Guardrail each named spec (the exact checks the renderer runs).
-    //    A top-level `geom` key marks the STATISTICAL dialect (issue #7):
-    //    typed-parse it (known geom / fields / annotations) — the column
-    //    cross-check needs escurel rows, so it stays a compose-time check —
-    //    then walk it for escape hatches like any spec. Everything else is
-    //    the Vega-Lite subset.
+    // 2. Guardrail each named spec (the exact shape checks the renderer
+    //    runs — allowed keys, known and permitted anofox roles). The column
+    //    cross-check needs escurel rows, so it stays a compose-time check.
     for (name, spec) in &skill.specs {
-        let checked = if spec.get("geom").is_some() {
-            peacock_types::StatSpec::parse(spec)
-                .map(drop)
-                .and_then(|()| check_vega_spec(spec))
-        } else {
-            check_vega_spec(spec)
-        };
-        if let Err(e) = checked {
+        if let Err(e) = crate::chart::check_spec_shape(spec) {
             errors.push(AuthorError::at(
                 spec_line(&fm, text, name),
                 format!("spec `{name}`: {e}"),
@@ -342,7 +331,7 @@ fn view_refs(view: &ViewSpec) -> (&str, Vec<&str>) {
     match view {
         ViewSpec::Kpi { data, .. } => (data.as_str(), Vec::new()),
         ViewSpec::Table { data } => (data.as_str(), Vec::new()),
-        ViewSpec::Vega {
+        ViewSpec::Chart {
             data,
             spec,
             spec_single,
@@ -403,14 +392,15 @@ data:
   rows: "[[query::TODO_query_id]]"
 views:
   - {{ kind: kpi,   data: rows, agg: sum, field: value, label: "Total" }}
-  - {{ kind: vega,  data: rows, spec: main_chart }}
+  - {{ kind: anofox, data: rows, spec: main_chart }}
   - {{ kind: table, data: rows }}
 specs:
+  # An anofox chart: each role reads one of the query's columns.
   main_chart:
-    mark: bar
-    encoding:
-      x: {{ field: label, type: ordinal,      title: Label }}
-      y: {{ field: value, type: quantitative, title: Value }}
+    title: TODO chart title
+    roles:
+      - [label, XAXIS]
+      - [value, BARCHART, Value]
 ---
 TODO: the agent-authored narrative for {report_id}.
 "#
@@ -429,13 +419,10 @@ render: a2ui
 data:
   rows: "[[query::q]]"
 views:
-  - { kind: vega, data: rows, spec: chart }
+  - { kind: anofox, data: rows, spec: chart }
 specs:
   chart:
-    mark: bar
-    encoding:
-      x: { field: a, type: ordinal }
-      y: { field: b, type: quantitative }
+    roles: [[a, XAXIS], [b, BARCHART]]
 ---
 narrative
 "#
@@ -466,7 +453,10 @@ narrative
 
     #[test]
     fn remote_url_in_spec_is_reported() {
-        let bad = sample().replace("mark: bar", "data: { url: \"http://x\" }\n    mark: bar");
+        let bad = sample().replace(
+            "roles: [[a, XAXIS], [b, BARCHART]]",
+            "url: \"http://x\"\n    roles: [[a, XAXIS], [b, BARCHART]]",
+        );
         let errs = validate_skill_markdown(&bad);
         assert!(
             errs.iter().any(|e| e.message.contains("url")),

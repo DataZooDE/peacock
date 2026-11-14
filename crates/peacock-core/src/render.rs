@@ -18,14 +18,21 @@ use crate::skill::ReportSkills;
 pub struct RenderOpts {
     /// Per-view row cap (NFR-P-3).
     pub max_rows: usize,
-    /// Rasterize the first chart to PNG and attach it to the artifact
-    /// (the chat surface / embedded preview path, FR-C-2/FR-E-2). `None`
-    /// skips rasterization; `Some(scale)` renders at `scale` ≥ 1.0.
+    /// Rasterize every chart to PNG (`artifact.pngs`; `artifact.png` is the
+    /// first, the chat-card preview — FR-C-2/FR-E-2). `None` skips
+    /// rasterization; `Some(scale)` renders at `scale` ≥ 1.0. The SVG is
+    /// painted on every render regardless.
     pub png_scale: Option<f32>,
-    /// Optional theme applied to the rasterized chart (corporate identity ⊕
-    /// host look). `None` renders peacock's stock palette. The matching CSS for
-    /// the web surfaces is attached at the service boundary, not here.
-    pub theme: Option<peacock_rasterizer::ThemeTokens>,
+    /// Optional theme the charts are painted with (corporate identity ⊕ host
+    /// look). `None` renders anofox's stock look. The matching CSS for the web
+    /// surfaces is attached at the service boundary, not here.
+    pub theme: Option<peacock_theme::ThemeTokens>,
+    /// Light or dark charts (MCP clients are often dark). Dark lifts the brand
+    /// colours to WCAG AA on the dark card.
+    pub variant: crate::chart::Variant,
+    /// Number/date locale for the charts (e.g. `de-DE`). `None` = anofox's
+    /// default (`en-US`).
+    pub locale: Option<String>,
     /// Optional sink capturing the **real** escurel wire payloads this render
     /// issues (resolve + each query_instance, request and response). Used by the
     /// demo's "under the hood" inspector to show genuine — not reconstructed —
@@ -56,6 +63,8 @@ impl Default for RenderOpts {
             max_rows: DEFAULT_MAX_ROWS,
             png_scale: None,
             theme: None,
+            variant: crate::chart::Variant::Light,
+            locale: None,
             trace: None,
             selection: None,
             mosaic_threshold: None,
@@ -161,41 +170,55 @@ where
         opts.mosaic_threshold,
     )?;
 
-    // 6. Optionally rasterize to PNG (chat / embedded preview), themed with
-    //    the resolved corporate identity ⊕ host look when set: the first
-    //    chart when the report has one, else the INSTANCE CARD (title +
-    //    facts + body + activity) for a chartless instance report — every
-    //    surface Triton fronts gets a usable image.
-    attach_png(&mut artifact, &skill, &pages, opts)?;
+    // 6. Paint every chart (SVG on its component; PNGs when a surface asked),
+    //    themed with the resolved corporate identity ⊕ host look. A
+    //    chartless instance report rasterizes its INSTANCE CARD instead, so
+    //    every surface Triton fronts gets a usable image.
+    paint(&mut artifact, &skill, &pages, opts)?;
 
     Ok(artifact)
 }
 
-/// Rasterize the artifact's preview PNG in place: the first chart when the
-/// report has one, else the instance card for a chartless instance report.
-/// No-op when the surface didn't ask for rasterization.
-fn attach_png(
+/// Paint the artifact in place: render each `kind: anofox` component's SVG
+/// (onto the component, so every surface sees the same picture), and — when
+/// the surface asked for rasterization — one PNG per chart, the first being
+/// the preview `png`. A chartless instance report gets its instance card as
+/// the preview instead.
+fn paint(
     artifact: &mut Artifact,
     skill: &crate::skill::ReportSkill,
     pages: &BTreeMap<String, InstancePage>,
     opts: &RenderOpts,
 ) -> Result<()> {
-    let Some(scale) = opts.png_scale else {
-        return Ok(());
+    let look = crate::chart::ChartLook {
+        theme: opts.theme.clone(),
+        variant: opts.variant,
+        locale: opts.locale.clone(),
     };
-    if let Some(spec) = artifact.vega_specs.first() {
-        let png = match &opts.theme {
-            Some(theme) => peacock_rasterizer::render_vega_to_png_themed(spec, scale, theme)?,
-            None => peacock_rasterizer::render_vega_to_png(spec, scale)?,
-        };
-        artifact.png = Some(png);
-    } else if let Some(spec) = artifact.stat_specs.first() {
-        // The backend selector (issue #6): a STATISTICAL spec (top-level
-        // `geom`) rasterizes through the pluggable ggplot backend. Only this
-        // PNG step is feature-gated — the spec itself composed above either
-        // way — and with the feature off it is a CLEAR error, never a skip.
-        artifact.png = Some(render_stat_png(spec, opts, scale)?);
-    } else if let Some(req) = instance_card_request(skill, pages) {
+    let mut pngs = Vec::new();
+    if let Some(components) = artifact
+        .a2ui
+        .get_mut("components")
+        .and_then(Value::as_array_mut)
+    {
+        for c in components.iter_mut() {
+            if c.get("kind").and_then(Value::as_str) != Some("anofox") {
+                continue;
+            }
+            let svg = crate::chart::render_svg(&c["spec"], &look)?;
+            if let Some(scale) = opts.png_scale {
+                pngs.push(crate::chart::svg_to_png_on(&svg, scale, &look)?);
+            }
+            c["svg"] = Value::String(svg);
+        }
+    }
+    artifact.png = pngs.first().cloned();
+    artifact.pngs = pngs;
+
+    if artifact.png.is_none()
+        && let Some(scale) = opts.png_scale
+        && let Some(req) = instance_card_request(skill, pages)
+    {
         let png = match &opts.theme {
             Some(theme) => {
                 peacock_rasterizer::render_instance_card_to_png_themed(&req, scale, theme)?
@@ -205,53 +228,6 @@ fn attach_png(
         artifact.png = Some(png);
     }
     Ok(())
-}
-
-/// Rasterize one STATISTICAL spec through the ggplot backend. The rows AND
-/// the escurel column schema come back out of the spec's injected inline
-/// `data` — exactly what the web surfaces see, so PNG/iframe parity holds by
-/// construction, and the backend types every column from escurel's reported
-/// type names (issue #8) instead of sniffing the JSON.
-#[cfg(feature = "ggplot")]
-fn render_stat_png(spec: &Value, opts: &RenderOpts, scale: f32) -> Result<Vec<u8>> {
-    let data = spec.get("data");
-    let rows = data
-        .and_then(|d| d.get("values"))
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    let schema: Vec<peacock_ggplot::ColumnSchema> = data
-        .and_then(|d| d.get("schema"))
-        .and_then(Value::as_array)
-        .map(|cols| {
-            cols.iter()
-                .filter_map(|c| {
-                    Some(peacock_ggplot::ColumnSchema {
-                        name: c.get("name")?.as_str()?.to_owned(),
-                        type_name: c.get("type")?.as_str()?.to_owned(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(peacock_ggplot::render_stat_to_png(
-        spec,
-        &rows,
-        &schema,
-        opts.theme.as_ref(),
-        scale,
-    )?)
-}
-
-/// The feature-off selector arm: a statistical spec was authored but this
-/// build cannot rasterize it — a clear error, never a silent skip. Only
-/// reachable when a report actually carries a `geom:` spec, so the base
-/// Vega-Lite path is untouched (issue #6 acceptance).
-#[cfg(not(feature = "ggplot"))]
-fn render_stat_png(_spec: &Value, _opts: &RenderOpts, _scale: f32) -> Result<Vec<u8>> {
-    Err(peacock_types::Error::render(
-        "statistical spec requires the `ggplot` feature (rebuild with `--features ggplot`)"
-            .to_owned(),
-    ))
 }
 
 /// The `document` pseudo-report: render one instance page (`{skill, id}`)
@@ -385,7 +361,7 @@ where
         opts.max_rows,
         opts.mosaic_threshold,
     )?;
-    attach_png(&mut artifact, &synthesized, &pages, opts)?;
+    paint(&mut artifact, &synthesized, &pages, opts)?;
     artifact.structured_content.document = Some(document);
     Ok(artifact)
 }
@@ -618,12 +594,6 @@ fn instance_card_request(
         }
     }
     Some(req)
-}
-
-/// Rasterize a single Vega-Lite chart spec to PNG — the `render_a2ui_to_png`
-/// capability Triton's chat surface delegates to (FR-V-2, FR-C-2).
-pub fn render_a2ui_to_png(spec: &serde_json::Value, scale: f32) -> Result<Vec<u8>> {
-    Ok(peacock_rasterizer::render_vega_to_png(spec, scale)?)
 }
 
 /// Bind a shared selection into the param vector when the report declares its

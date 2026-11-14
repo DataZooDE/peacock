@@ -1,9 +1,10 @@
 //! The composer: `(report skill, absolute params, rows) → Artifact`, one pure
-//! pass (FR-R-2, FR-R-3, FR-V-1/3). Builds the A2UI v0.9 layout (KPI / vega /
-//! table / text), the `kind: vega` custom components carrying Vega-Lite specs
-//! with the escurel rows injected **inline** (FR-V-3), and the
-//! `structuredContent` (rows + param schema + current resolved params,
-//! FR-X-1). Guardrails (FR-V-4) and an oversize bound (NFR-P-3) run here.
+//! pass (FR-R-2, FR-R-3, FR-V-1/3). Builds the A2UI v0.9 layout (KPI / chart /
+//! table / text), the `kind: anofox` components carrying anofox panel specs
+//! with the escurel rows injected **inline** (FR-V-3), the derived Vega-Lite
+//! compatibility specs, and the `structuredContent` (rows + param schema +
+//! current resolved params, FR-X-1). Guardrails (FR-V-4) and an oversize
+//! bound (NFR-P-3) run here. Painting (SVG/PNG) is the render step's job.
 
 use std::collections::BTreeMap;
 
@@ -11,7 +12,7 @@ use peacock_types::{Artifact, Error, ParamValue, Result, StructuredContent};
 use serde_json::{Value, json};
 
 use crate::data::RowSet;
-use crate::guardrail::{check_mosaic_source, check_stat_spec, check_vega_spec};
+use crate::guardrail::{check_mosaic_source, check_vega_spec};
 use crate::instance::InstancePage;
 use crate::skill::{Agg, ReportSkill, ViewSpec};
 
@@ -52,7 +53,7 @@ pub fn compose(
 
     let mut components: Vec<Value> = Vec::new();
     let mut vega_specs: Vec<Value> = Vec::new();
-    let mut stat_specs: Vec<Value> = Vec::new();
+    let mut anofox_specs: Vec<Value> = Vec::new();
 
     // Two layouts. When the body carries inline `{{tags}}` (the "markdown +
     // tags" page format), render its segments in document order — narrative
@@ -90,7 +91,7 @@ pub fn compose(
                             bound,
                             mosaic_threshold,
                             &mut vega_specs,
-                            &mut stat_specs,
+                            &mut anofox_specs,
                             &mut any_mosaic,
                         )?);
                     }
@@ -107,7 +108,7 @@ pub fn compose(
                 bound,
                 mosaic_threshold,
                 &mut vega_specs,
-                &mut stat_specs,
+                &mut anofox_specs,
                 &mut any_mosaic,
             )?);
         }
@@ -136,13 +137,14 @@ pub fn compose(
     Ok(Artifact {
         a2ui,
         vega_specs,
-        stat_specs,
+        anofox_specs,
         structured_content,
         png: None,
+        pngs: Vec::new(),
     })
 }
 
-/// Render ONE view into its A2UI component, pushing any Vega/stat spec onto the
+/// Render ONE view into its A2UI component, pushing any chart spec onto the
 /// tracking vectors and flagging Mosaic mode. Shared by the classic `views:`
 /// loop and the inline-tag body layout, so both produce byte-identical
 /// components for the same view.
@@ -155,7 +157,7 @@ fn render_view(
     bound: &Value,
     mosaic_threshold: Option<usize>,
     vega_specs: &mut Vec<Value>,
-    stat_specs: &mut Vec<Value>,
+    anofox_specs: &mut Vec<Value>,
     any_mosaic: &mut bool,
 ) -> Result<Value> {
     match view {
@@ -169,7 +171,7 @@ fn render_view(
             let value = fold(rs, *agg, field);
             Ok(json!({ "kind": "kpi", "label": label, "field": field, "value": value }))
         }
-        ViewSpec::Vega {
+        ViewSpec::Chart {
             data,
             spec,
             spec_single,
@@ -177,34 +179,32 @@ fn render_view(
             let rs = rowset(rows, data)?;
             let n = rs.rows.as_array().map(Vec::len).unwrap_or(0);
             // Pick the single-series spec (e.g. a line) when the data has ≤1
-            // colour series — a stacked bar across categories reads well, but a
-            // drilled single category reads better as a line.
+            // `CATEGORY` series — a stacked bar across categories reads well,
+            // but a drilled single category reads better as a line.
             let chosen = match spec_single {
                 Some(single) if series_count(skill, spec, rs) <= 1 => single,
                 _ => spec,
             };
-            let mut chart =
-                skill.specs.get(chosen).cloned().ok_or_else(|| {
-                    Error::render(format!("vega view names unknown spec `{chosen}`"))
-                })?;
-
-            // A top-level `geom` key marks a STATISTICAL spec (issue #6;
-            // Vega-Lite uses `mark`, never `geom`): guardrail it, inject the
-            // rows exactly like a Vega view (structuredContent / iframe parity),
-            // and route it to `stat_specs`. Stat views always inline.
-            if chart.get("geom").is_some() {
-                let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
-                check_stat_spec(&chart, &columns)?;
-                inject_stat_data(&mut chart, rs);
-                stat_specs.push(chart.clone());
-                return Ok(json!({ "kind": "stat", "spec": chart }));
-            }
-
-            // Guardrail the AUTHORED spec first — a remote `data.url` or an
-            // expression escape hatch is rejected (ACC-4), not silently stripped.
-            check_vega_spec(&chart)?;
+            let authored = skill.specs.get(chosen).ok_or_else(|| {
+                Error::render(format!("chart view names unknown spec `{chosen}`"))
+            })?;
+            // Guardrail + column cross-check, rows re-keyed for anofox.
+            let panel = crate::chart::panel_spec(authored, rs)?;
+            let derived = crate::chart::derive_vega_lite(&panel);
 
             if mosaic_threshold.is_some_and(|t| n > t) {
+                // Mosaic mode streams from escurel: the client draws a
+                // vgplot spec — the DERIVED Vega-Lite, with its inline rows
+                // stripped — over an escurel-owned data-source reference.
+                let mut chart = derived.ok_or_else(|| {
+                    Error::render(format!(
+                        "spec `{chosen}`: Mosaic mode needs a bar / line / area / pie chart"
+                    ))
+                })?;
+                if let Value::Object(m) = &mut chart {
+                    m.remove("data");
+                }
+                check_vega_spec(&chart)?;
                 let query_ref = skill.data.get(data).cloned().unwrap_or_default();
                 let source = json!({
                     "connector": "escurel",
@@ -218,9 +218,11 @@ fn render_view(
                     "artifact": { "spec": chart, "source": source, "row_count": n },
                 }))
             } else {
-                inject_inline_data(&mut chart, rs.rows.clone());
-                vega_specs.push(chart.clone());
-                Ok(json!({ "kind": "vega", "spec": chart }))
+                if let Some(v) = derived {
+                    vega_specs.push(v);
+                }
+                anofox_specs.push(panel.clone());
+                Ok(json!({ "kind": "anofox", "spec": panel }))
             }
         }
         ViewSpec::Table { data } => {
@@ -269,7 +271,7 @@ pub(crate) fn tag_to_view(tag: &crate::body_tags::BodyTag) -> Option<ViewSpec> {
     let arg = |k: &str| tag.args.get(k).cloned();
     match tag.name.as_str() {
         // `{{chart: rows spec=convergence spec_single=conv_line}}`
-        "chart" | "vega" => Some(ViewSpec::Vega {
+        "chart" | "anofox" => Some(ViewSpec::Chart {
             data: alias(),
             spec: arg("spec").unwrap_or_else(|| "chart".to_string()),
             spec_single: arg("spec_single"),
@@ -375,16 +377,15 @@ fn subst_params(s: &str, bound: &Value) -> String {
     out
 }
 
-/// Count the distinct colour-series in a view's rows, per the named spec's
-/// `encoding.color.field`. Used to pick a single-series chart on a drill.
+/// Count the distinct `CATEGORY` series in a view's rows, per the named
+/// spec's roles. Used to pick a single-series chart on a drill.
 fn series_count(skill: &ReportSkill, spec: &str, rs: &RowSet) -> usize {
-    let color_field = skill
+    let columns: Vec<&str> = rs.schema.iter().map(|c| c.name.as_str()).collect();
+    let field = skill
         .specs
         .get(spec)
-        .and_then(|s| s.get("encoding"))
-        .and_then(|e| e.get("color"))
-        .and_then(|c| c.get("field"))
-        .and_then(Value::as_str);
+        .and_then(|s| crate::chart::category_column(s, &columns));
+    let color_field = field.as_deref();
     match color_field {
         Some(field) => {
             let mut seen = std::collections::BTreeSet::new();
@@ -472,32 +473,6 @@ fn event_json(e: &crate::instance::InstanceEvent) -> Value {
         "title": e.title,
         "body": e.body,
     })
-}
-
-/// Inject `data: { values: rows }` into a Vega-Lite spec, replacing any
-/// existing `data` (so an authored remote `data.url` can never survive).
-fn inject_inline_data(spec: &mut Value, rows: Value) {
-    if let Value::Object(map) = spec {
-        map.insert("data".to_owned(), json!({ "values": rows }));
-    }
-}
-
-/// Inject `data: { values, schema }` into a STATISTICAL spec — the rows plus
-/// escurel's column schema, so the ggplot backend types every column from the
-/// reported type names instead of sniffing the JSON (issue #8). Replaces any
-/// authored `data` (same escape-hatch rule as [`inject_inline_data`]).
-fn inject_stat_data(spec: &mut Value, rs: &RowSet) {
-    if let Value::Object(map) = spec {
-        let schema: Vec<Value> = rs
-            .schema
-            .iter()
-            .map(|c| json!({ "name": c.name, "type": c.type_name }))
-            .collect();
-        map.insert(
-            "data".to_owned(),
-            json!({ "values": rs.rows.clone(), "schema": schema }),
-        );
-    }
 }
 
 /// Fold an aggregate over a view's rows — a summary of already-aggregated rows

@@ -86,6 +86,32 @@ enum ColumnRef {
 
 /// Validate an authored spec against the safe subset and the view's columns.
 pub fn check_spec(spec: &Value, columns: &[&str]) -> Result<()> {
+    check_spec_shape(spec)?;
+    for r in parse_roles(spec)? {
+        match &r.column {
+            ColumnRef::Name(n) if !columns.contains(&n.as_str()) => {
+                return Err(Error::render(format!(
+                    "anofox role `{}` names unknown column `{n}` (columns: {})",
+                    r.token,
+                    columns.join(", ")
+                )));
+            }
+            ColumnRef::Index(i) if *i >= columns.len() => {
+                return Err(Error::render(format!(
+                    "anofox role `{}` names column index {i}, but the view has {} columns",
+                    r.token,
+                    columns.len()
+                )));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Validate an authored spec's shape without the rows: allowed keys, known
+/// and permitted roles. Used at parse/author time, where no columns exist yet.
+pub fn check_spec_shape(spec: &Value) -> Result<()> {
     let obj = spec
         .as_object()
         .ok_or_else(|| Error::render("anofox spec must be a mapping".to_owned()))?;
@@ -135,25 +161,20 @@ pub fn check_spec(spec: &Value, columns: &[&str]) -> Result<()> {
                 r.token
             )));
         }
-        match &r.column {
-            ColumnRef::Name(n) if !columns.contains(&n.as_str()) => {
-                return Err(Error::render(format!(
-                    "anofox role `{}` names unknown column `{n}` (columns: {})",
-                    r.token,
-                    columns.join(", ")
-                )));
-            }
-            ColumnRef::Index(i) if *i >= columns.len() => {
-                return Err(Error::render(format!(
-                    "anofox role `{}` names column index {i}, but the view has {} columns",
-                    r.token,
-                    columns.len()
-                )));
-            }
-            _ => {}
-        }
     }
     Ok(())
+}
+
+/// The escurel column name a spec's `CATEGORY` role reads, if any (the
+/// series a drill narrows; picks `spec_single`).
+pub fn category_column(spec: &Value, columns: &[&str]) -> Option<String> {
+    parse_roles(spec).ok()?.into_iter().find_map(|r| {
+        let canonical = anofox_visualization::roles::lookup(&r.token)?.token;
+        (canonical == "CATEGORY").then(|| match r.column {
+            ColumnRef::Name(n) => Some(n),
+            ColumnRef::Index(i) => columns.get(i).map(|c| (*c).to_owned()),
+        })?
+    })
 }
 
 fn parse_roles(spec: &Value) -> Result<Vec<RoleRef>> {
@@ -323,10 +344,30 @@ fn font_db() -> &'static Arc<usvg::fontdb::Database> {
     })
 }
 
-/// Rasterize an SVG document to PNG at `scale` (≥ 1.0). Only `data:` images
-/// resolve (usvg is given no resource directory, so nothing is read from disk
-/// or the network).
+/// Rasterize a chart onto its variant's card colour — the PNG a chat client
+/// shows. anofox's SVG is transparent (the page supplies the card), so a
+/// transparent dark-variant PNG would put light text on whatever the client
+/// paints behind it.
+pub fn svg_to_png_on(svg: &str, scale: f32, look: &ChartLook) -> Result<Vec<u8>> {
+    let card = match look.variant {
+        Variant::Dark => peacock_theme::DARK_CARD.to_owned(),
+        Variant::Light => look
+            .theme
+            .as_ref()
+            .map(|t| t.surface.clone())
+            .unwrap_or_else(|| "#ffffff".to_owned()),
+    };
+    rasterize(svg, scale, Some(&card))
+}
+
+/// Rasterize an SVG document to PNG at `scale` (≥ 1.0), transparent. Only
+/// `data:` images resolve (usvg is given no resource directory, so nothing is
+/// read from disk or the network).
 pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>> {
+    rasterize(svg, scale, None)
+}
+
+fn rasterize(svg: &str, scale: f32, background: Option<&str>) -> Result<Vec<u8>> {
     let mut opt = usvg::Options {
         font_family: "Hanken Grotesk".to_string(),
         resources_dir: None,
@@ -346,6 +387,9 @@ pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>> {
     let h = (size.height() * scale).ceil().max(1.0) as u32;
     let mut pixmap = tiny_skia::Pixmap::new(w, h)
         .ok_or_else(|| Error::render("could not allocate pixmap".to_owned()))?;
+    if let Some((r, g, b)) = background.and_then(parse_rgb) {
+        pixmap.fill(tiny_skia::Color::from_rgba8(r, g, b, 255));
+    }
     resvg::render(
         &tree,
         tiny_skia::Transform::from_scale(scale, scale),
@@ -354,4 +398,135 @@ pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>> {
     pixmap
         .encode_png()
         .map_err(|e| Error::render(format!("png encode: {e}")))
+}
+
+// ── derived Vega-Lite (compatibility output) ────────────────────────────────
+
+/// A minimal Vega-Lite spec derived from a panel, for consumers that read
+/// Vega-Lite natively: Triton's Teams `Chart.VerticalBar` mapping, Gemini
+/// Enterprise's `VegaChart`, and Mosaic mode. Only bar / line / area /
+/// scatter / pie / donut panels derive (`XAXIS` + optional `CATEGORY` /
+/// `SIZE` + one value role);
+/// everything else is `None` and those surfaces show the PNG. Field names are
+/// the roles' display names, so the native chart's labels read like the PNG.
+pub fn derive_vega_lite(panel: &Value) -> Option<Value> {
+    let roles = panel.get("roles")?.as_array()?;
+    let mut x: Option<(usize, String)> = None;
+    let mut cat: Option<(usize, String)> = None;
+    let mut size: Option<(usize, String)> = None;
+    let mut val: Option<(usize, String, &'static str)> = None;
+    let mut title: Option<usize> = None;
+    for r in roles {
+        let i = r.get(0)?.as_u64()? as usize;
+        let tok = r.get(1)?.as_str()?;
+        let name = r
+            .get(2)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let canonical = anofox_visualization::roles::lookup(tok)?.token;
+        match canonical {
+            "XAXIS" => x = Some((i, name)),
+            "CATEGORY" => cat = Some((i, name)),
+            "SIZE" => size = Some((i, name)),
+            "TITLE" => title = Some(i),
+            "BARCHART" | "BARCHART_STACKED" | "LINECHART" | "AREACHART" | "AREACHART_STACKED"
+            | "SCATTER" | "PIE" | "DONUTCHART"
+                if val.is_none() =>
+            {
+                val = Some((i, name, canonical));
+            }
+            // Any other role (a second measure, a modifier, a heatmap axis)
+            // means the panel is richer than the minimal spec can say.
+            _ => return None,
+        }
+    }
+    let (vi, vname, kind) = val?;
+    let rows = panel.get("rows")?.as_array()?;
+    let key = |i: usize| format!("c{i}");
+    let values: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            let mut out = Map::new();
+            let mut put = |slot: &Option<(usize, String)>| {
+                if let Some((i, n)) = slot {
+                    out.insert(n.clone(), row.get(key(*i)).cloned().unwrap_or(Value::Null));
+                }
+            };
+            put(&x);
+            put(&cat);
+            put(&size);
+            out.insert(
+                vname.clone(),
+                row.get(key(vi)).cloned().unwrap_or(Value::Null),
+            );
+            Value::Object(out)
+        })
+        .collect();
+    let title_text = title
+        .and_then(|i| rows.first().and_then(|r| r.get(key(i))))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    let mut spec = json!({
+        "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+        "title": title_text,
+        "data": { "values": values },
+    });
+    match kind {
+        "PIE" | "DONUTCHART" => {
+            let (_, cname) = cat.as_ref()?;
+            let mut mark = json!({ "type": "arc" });
+            if kind == "DONUTCHART" {
+                mark["innerRadius"] = json!(50);
+            }
+            spec["mark"] = mark;
+            spec["encoding"] = json!({
+                "theta": { "field": vname, "type": "quantitative" },
+                "color": { "field": cname, "type": "nominal" },
+            });
+        }
+        _ => {
+            let (_, xname) = x.as_ref()?;
+            let mark = match kind {
+                "LINECHART" => "line",
+                "AREACHART" | "AREACHART_STACKED" => "area",
+                "SCATTER" => "point",
+                _ => "bar",
+            };
+            spec["mark"] = json!({ "type": mark });
+            let mut y = json!({ "field": vname, "type": "quantitative" });
+            if !matches!(kind, "BARCHART_STACKED" | "AREACHART_STACKED" | "SCATTER") {
+                y["stack"] = Value::Null;
+            }
+            let x_type = if kind == "SCATTER" {
+                "quantitative"
+            } else {
+                "ordinal"
+            };
+            let mut enc = json!({
+                "x": { "field": xname, "type": x_type },
+                "y": y,
+            });
+            if let Some((_, cname)) = &cat {
+                enc["color"] = json!({ "field": cname, "type": "nominal" });
+            }
+            if let Some((_, sname)) = &size {
+                enc["size"] = json!({ "field": sname, "type": "quantitative" });
+            }
+            spec["encoding"] = enc;
+        }
+    }
+    Some(spec)
+}
+
+fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {
+    let h = s.trim().strip_prefix('#')?;
+    let h: String = match h.len() {
+        3 => h.chars().flat_map(|c| [c, c]).collect(),
+        6 => h.to_owned(),
+        _ => return None,
+    };
+    let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).ok();
+    Some((p(0)?, p(2)?, p(4)?))
 }

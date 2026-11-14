@@ -6,7 +6,7 @@
 //! - `skill` — the report-skill model + escurel resolution (FR-D-1);
 //! - `chart` — the anofox-visualization chart engine (issue #44);
 //! - `guardrail` — the safe Vega-Lite subset (FR-V-4);
-//! - `compose` — A2UI v0.9 + kind:vega + structuredContent (FR-R-3, FR-V);
+//! - `compose` — A2UI v0.9 + kind:anofox + structuredContent (FR-R-3, FR-V);
 //! - `render` — the orchestration every surface funnels through;
 //! - `author` — the authoring tooling (validate / scaffold) that reuses the
 //!   parser and guardrail so an author is checked against the renderer's rules.
@@ -29,7 +29,7 @@ pub use data::{Column, EscurelData, ReportData, RowSet};
 pub use instance::{InstanceData, InstancePage};
 pub use render::{
     DOCUMENT_REPORT_ID, RenderOpts, emit_document_event, promotable_selection, render,
-    render_a2ui_to_png, view_state_record,
+    view_state_record,
 };
 pub use saved::{BOOKMARK_SKILL, SavedRef, render_saved, resolve_saved_instance, save_instance};
 pub use skill::{

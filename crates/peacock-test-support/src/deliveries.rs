@@ -1,7 +1,6 @@
-//! Seed a real escurel with the SUPPLIER-DELIVERIES world — the ggplot
-//! statistical backend's acceptance scenario (issue #8): a lead-time
-//! DENSITY with the contracted SLA as a `vline` and the computed `p90`
-//! marker, over a committed deterministic Parquet fixture
+//! Seed a real escurel with the SUPPLIER-DELIVERIES world — a statistical
+//! chart scenario: a lead-time DENSITY with the contracted SLA as an `XLINE`
+//! reference line, over a committed deterministic Parquet fixture
 //! (`fixtures/deliveries/`, regenerate with
 //! `duckdb < fixtures/deliveries/gen.sql`). Mirrors [`crate::NorthwindEscurel`]:
 //! a credential-free offline `parquet_dir` sql_view, a `query` page binding
@@ -67,7 +66,8 @@ fn query_lead_times() -> String {
      params:\n\
      \x20 - {name: from, type: date, required: true}\n\
      \x20 - {name: to, type: date, required: true}\n\
-     sql: \"SELECT supplier AS supplier, actual_days::DOUBLE AS actual_days FROM {{target}} \
+     sql: \"SELECT supplier AS supplier, actual_days::DOUBLE AS actual_days, \
+     14.0::DOUBLE AS sla_days FROM {{target}} \
      WHERE delivered_on BETWEEN :from AND :to ORDER BY delivered_on, supplier\"\n\
      ---\n\
      # sd_lead_times\n\
@@ -76,8 +76,8 @@ fn query_lead_times() -> String {
 }
 
 /// The `supplier-lead-times` report skill: the lead-time DENSITY with the
-/// contracted 14-day SLA `vline` and the computed `p90` marker — authored
-/// entirely in escurel markdown, rendered by the ggplot backend.
+/// contracted 14-day SLA as an `XLINE` reference line — authored entirely in
+/// escurel markdown, rendered by anofox.
 pub fn skill_report_lead_times() -> String {
     r#"---
 kind: skill
@@ -90,19 +90,17 @@ params:
 data:
   deliveries: "[[query::sd_lead_times]]"
 views:
-  - { kind: vega,  data: deliveries, spec: leadtime_density }
-  - { kind: table, data: deliveries }
+  - { kind: anofox, data: deliveries, spec: leadtime_density }
+  - { kind: table,  data: deliveries }
 specs:
   leadtime_density:
-    geom: density
-    x: actual_days
     title: Supplier lead times vs contract
-    annotations:
-      - { kind: vline, at: 14.0, label: contract }
-      - { kind: p90 }
+    roles:
+      - [actual_days, DENSITY, "Lead time (days)"]
+      - [sla_days, XLINE, contract]
 ---
-Realised lead time per completed delivery, all suppliers. The dashed line is
-the contracted 14-day SLA; the dotted line is the observed 90th percentile.
+Realised lead time per completed delivery, all suppliers. The line marks the
+contracted 14-day SLA.
 "#
     .to_owned()
 }
@@ -128,10 +126,19 @@ impl DeliveriesEscurel {
             .instance("query", SD_QUERY_REF, query_lead_times())
             .done();
 
+        // The engine confines directory connectors to the operator's
+        // allow-list (`ESCUREL_SQL_FILE_DIRS`), as in `NorthwindEscurel`.
+        let config_overrides = escurel_test_support::ConfigOverrides {
+            egress: Some(escurel_test_support::EgressPolicy {
+                sql_file_dirs: vec![deliveries_dir(), std::env::temp_dir()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
         let process = EscurelProcess::spawn(Opts {
             auth: AuthMode::TestIssuer,
             fixtures: Some(fixtures),
-            config_overrides: Default::default(),
+            config_overrides,
         })
         .await;
 

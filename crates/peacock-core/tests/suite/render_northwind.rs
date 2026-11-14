@@ -23,21 +23,30 @@ async fn renders_the_northwind_report_as_one_artifact() {
     .await
     .expect("render the Northwind report");
 
-    // A2UI v0.9 with kpi + vega + table + narrative text.
+    // A2UI v0.9 with kpi + chart + table + narrative text.
     assert_eq!(art.a2ui["version"], "0.9");
     let comps = art.a2ui["components"].as_array().unwrap();
     assert_eq!(comps.iter().filter(|c| c["kind"] == "kpi").count(), 1);
-    assert_eq!(comps.iter().filter(|c| c["kind"] == "vega").count(), 1);
+    assert_eq!(comps.iter().filter(|c| c["kind"] == "anofox").count(), 1);
     assert_eq!(comps.iter().filter(|c| c["kind"] == "table").count(), 1);
 
     // KPI = total 1997 revenue across the real Parquet data.
     let kpi = comps.iter().find(|c| c["kind"] == "kpi").unwrap();
     assert_eq!(kpi["value"].as_f64().unwrap(), 2986.0);
 
-    // The chart carries the escurel rows INLINE (no remote URL) — 16 groups.
-    let vega = comps.iter().find(|c| c["kind"] == "vega").unwrap();
-    assert_eq!(vega["spec"]["data"]["values"].as_array().unwrap().len(), 16);
-    assert!(vega["spec"]["data"].get("url").is_none());
+    // The chart carries the escurel rows INLINE — 16 groups — and its
+    // painted SVG; the derived Vega-Lite rides alongside for Triton.
+    let chart = comps.iter().find(|c| c["kind"] == "anofox").unwrap();
+    assert_eq!(chart["spec"]["rows"].as_array().unwrap().len(), 16);
+    let svg = chart["svg"].as_str().expect("the chart is painted");
+    assert!(svg.contains("Beverages") && svg.contains("Revenue by category"));
+    assert_eq!(
+        art.vega_specs[0]["data"]["values"]
+            .as_array()
+            .unwrap()
+            .len(),
+        16
+    );
 
     // structuredContent carries rows + the resolved (defaulted) params (FR-X-1).
     assert_eq!(art.structured_content.rows.as_array().unwrap().len(), 16);

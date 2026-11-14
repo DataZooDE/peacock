@@ -64,10 +64,7 @@ impl ThemeTokens {
 
         let dark_brand = lift_to_contrast(&brand, DARK_CARD, AA_TEXT);
         let dark_accent = lift_to_contrast(&accent, DARK_CARD, AA_TEXT);
-        let dark_palette: Vec<String> = palette
-            .iter()
-            .map(|c| lift_to_contrast(c, DARK_CARD, AA_GRAPHIC))
-            .collect();
+        let dark_palette = lift_palette(&palette, DARK_CARD, AA_GRAPHIC);
 
         let mut def = json!({
             "name": self.name.clone().unwrap_or_else(|| "peacock".into()),
@@ -152,6 +149,63 @@ pub fn lift_to_contrast(fg: &str, bg: &str, min: f64) -> String {
         }
     }
     hex(hsl_to_rgb(h, s, l2))
+}
+
+/// Smallest RGB distance two series colours keep after lifting.
+const MIN_SERIES_DISTANCE: f64 = 24.0;
+
+/// Lift every palette colour to `min` contrast on `bg`, keeping the series
+/// distinguishable: two dark shades of one hue lift to nearly the same
+/// colour, so a colour that lands too close to an earlier one keeps moving
+/// in lightness (then, at the pole, the other way) until it is distinct.
+fn lift_palette(palette: &[String], bg: &str, min: f64) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(palette.len());
+    let Some(b) = parse_hex(bg) else {
+        return palette.to_vec();
+    };
+    let lighten = luminance(b) < 0.5;
+    for c in palette {
+        let lifted = lift_to_contrast(c, bg, min);
+        let Some(rgb) = parse_hex(&lifted) else {
+            out.push(lifted);
+            continue;
+        };
+        let clashes = |x: Rgb, out: &[String]| {
+            out.iter()
+                .filter_map(|o| parse_hex(o))
+                .any(|o| distance(o, x) < MIN_SERIES_DISTANCE)
+        };
+        if !clashes(rgb, &out) {
+            out.push(lifted);
+            continue;
+        }
+        let (h, s, l) = rgb_to_hsl(rgb);
+        let mut found = None;
+        for dir in [
+            if lighten { 1.0 } else { -1.0 },
+            if lighten { -1.0 } else { 1.0 },
+        ] {
+            let mut l2 = l;
+            while (0.0..=1.0).contains(&l2) {
+                l2 += dir * 0.01;
+                let cand = hsl_to_rgb(h, s, l2.clamp(0.0, 1.0));
+                if contrast_ratio(&hex(cand), bg).unwrap_or(0.0) >= min && !clashes(cand, &out) {
+                    found = Some(hex(cand));
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        out.push(found.unwrap_or(lifted));
+    }
+    out
+}
+
+fn distance(a: Rgb, b: Rgb) -> f64 {
+    let d = |x: u8, y: u8| (x as f64 - y as f64).powi(2);
+    (d(a.0, b.0) + d(a.1, b.1) + d(a.2, b.2)).sqrt()
 }
 
 type Rgb = (u8, u8, u8);

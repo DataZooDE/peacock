@@ -229,3 +229,34 @@ fn light_variant_leaves_a_compliant_brand_untouched() {
     let j = ThemeTokens::default().to_anofox_json(Variant::Light);
     assert_eq!(j["colors"]["accent"], "#0f6cbd");
 }
+
+#[test]
+fn dark_palette_stays_distinct_after_lifting() {
+    // Lifting several dark purples to the same contrast floor must not
+    // collapse two series onto one colour.
+    let t = ThemeRegistry::builtin()
+        .resolve("company-a", "copilot")
+        .tokens;
+    let j = t.to_anofox_json(Variant::Dark);
+    let pal: Vec<&str> = j["dark"]["palette"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let rgb = |h: &str| -> [f64; 3] {
+        let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).unwrap() as f64;
+        [p(1), p(3), p(5)]
+    };
+    for (i, a) in pal.iter().enumerate() {
+        for b in &pal[i + 1..] {
+            let (x, y) = (rgb(a), rgb(b));
+            let d = ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt();
+            assert!(
+                d >= 24.0,
+                "dark palette {a} vs {b} too close ({d:.1}): {pal:?}"
+            );
+        }
+        assert!(contrast_ratio(a, peacock_theme::DARK_CARD).unwrap() >= 3.0);
+    }
+}

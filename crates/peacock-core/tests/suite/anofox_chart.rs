@@ -214,3 +214,99 @@ fn png_rasterizes_the_svg() {
         "deterministic PNG"
     );
 }
+
+// ── derived Vega-Lite: the Triton native-chart wire contract (Phase 2) ──────
+
+fn derived(roles: Value) -> Option<Value> {
+    let spec = json!({ "title": "Revenue by category", "roles": roles });
+    let panel = chart::panel_spec(&spec, &nw_rows()).unwrap();
+    chart::derive_vega_lite(&panel)
+}
+
+#[test]
+fn bar_roles_derive_the_shape_triton_reads() {
+    for (role, stack) in [("BARCHART", false), ("BARCHART_STACKED", true)] {
+        let v = derived(json!([
+            ["month", "XAXIS"],
+            ["category", "CATEGORY"],
+            ["revenue", role, "Revenue"]
+        ]))
+        .unwrap_or_else(|| panic!("{role} must derive"));
+        assert_eq!(v["mark"]["type"], "bar", "{role}");
+        assert_eq!(v["title"], "Revenue by category");
+        // triton's chart_from_vega: data.values + encoding.{x,y,color}.field.
+        assert_eq!(v["encoding"]["x"]["field"], "month");
+        assert_eq!(v["encoding"]["y"]["field"], "Revenue");
+        assert_eq!(v["encoding"]["color"]["field"], "category");
+        assert_eq!(v["data"]["values"].as_array().unwrap().len(), 3);
+        assert_eq!(v["data"]["values"][0]["Revenue"], 180.5);
+        assert_eq!(v["data"]["values"][0]["category"], "Beverages");
+        assert_eq!(v["encoding"]["y"].get("stack").is_some(), !stack, "{role}");
+    }
+}
+
+#[test]
+fn line_and_area_derive() {
+    for (role, mark) in [
+        ("LINECHART", "line"),
+        ("AREACHART", "area"),
+        ("AREACHART_STACKED", "area"),
+    ] {
+        let v = derived(json!([["month", "XAXIS"], ["revenue", role]])).unwrap();
+        assert_eq!(v["mark"]["type"], mark, "{role}");
+        assert!(v["encoding"].get("color").is_none());
+    }
+}
+
+#[test]
+fn pie_and_donut_derive_an_arc() {
+    for (role, inner) in [("PIE", false), ("DONUT", true)] {
+        let v = derived(json!([["category", "CATEGORY"], ["revenue", role]])).unwrap();
+        assert_eq!(v["mark"]["type"], "arc");
+        assert_eq!(v["encoding"]["theta"]["field"], "revenue");
+        assert_eq!(v["encoding"]["color"]["field"], "category");
+        assert_eq!(v["mark"].get("innerRadius").is_some(), inner, "{role}");
+    }
+}
+
+#[test]
+fn non_chartable_roles_derive_nothing() {
+    for roles in [
+        json!([["revenue", "KPI"]]),
+        json!([["revenue", "HISTOGRAM"]]),
+        json!([
+            ["month", "XAXIS"],
+            ["category", "YAXIS"],
+            ["revenue", "HEATMAP"]
+        ]),
+        json!([["category", "TABLE"], ["revenue", "TABLE"]]),
+    ] {
+        assert!(derived(roles.clone()).is_none(), "{roles}");
+    }
+}
+
+#[test]
+fn png_is_painted_on_the_variant_card_not_transparent() {
+    // A transparent dark-variant PNG puts light text on whatever the chat
+    // client paints behind it (usually white) — unreadable.
+    let panel = chart::panel_spec(&stacked_spec(), &nw_rows()).unwrap();
+    for (variant, expect_dark) in [(Variant::Light, false), (Variant::Dark, true)] {
+        let look = ChartLook {
+            variant,
+            ..Default::default()
+        };
+        let svg = chart::render_svg(&panel, &look).unwrap();
+        let png = chart::svg_to_png_on(&svg, 1.0, &look).unwrap();
+        let img = image_corner(&png);
+        assert_eq!(img.3, 255, "{variant:?}: opaque corner");
+        let lum = (img.0 as u32 + img.1 as u32 + img.2 as u32) / 3;
+        assert_eq!(lum < 64, expect_dark, "{variant:?}: corner {img:?}");
+    }
+}
+
+/// The top-left pixel (RGBA) of a PNG.
+fn image_corner(png: &[u8]) -> (u8, u8, u8, u8) {
+    let p = tiny_skia::Pixmap::decode_png(png).unwrap();
+    let c = p.pixel(0, 0).unwrap().demultiply();
+    (c.red(), c.green(), c.blue(), c.alpha())
+}

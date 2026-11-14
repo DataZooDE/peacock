@@ -3,11 +3,13 @@
 //! rasterization:
 //!
 //! - `a2ui` — the A2UI v0.9 layout document (KPI/table/text/controls);
-//! - `vega_specs` — the Vega-Lite specs the layout's `kind:vega` components
-//!   embed (kept separable from layout, FR-V-1);
+//! - `anofox_specs` — the anofox panel specs (rows inline) the layout's
+//!   `kind: anofox` components embed (kept separable from layout, FR-V-1);
+//! - `vega_specs` — minimal Vega-Lite DERIVED from the chartable panels, a
+//!   compatibility output for native-chart consumers (Triton's Teams/GE);
 //! - `structured_content` — typed rows + the parameter schema **and the
 //!   current resolved parameter values** (the view state, FR-X-1);
-//! - `png` — an on-demand chart rasterization (chat path, FR-V-2).
+//! - `png` / `pngs` — on-demand chart rasterizations (chat path, FR-V-2).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,17 +41,37 @@ pub struct StructuredContent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artifact {
     pub a2ui: Value,
+    /// Derived Vega-Lite (compatibility output) for the chartable panels —
+    /// bar / line / area / pie / donut. Other chart kinds have none.
     pub vega_specs: Vec<Value>,
-    /// STATISTICAL specs (top-level `geom`, issue #6) the layout's
-    /// `kind: stat` components embed — the pluggable-backend peer of
-    /// `vega_specs`, rows injected inline the same way. Composed
-    /// unconditionally (backend-independent); only rasterization needs the
-    /// `ggplot` feature. Absent when no stat spec is authored, so existing
-    /// serialized artifacts stay byte-identical.
+    /// The anofox panel specs (`{rows, roles, …}`), one per chart, in layout
+    /// order. The painted SVG rides on each `kind: anofox` component.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub stat_specs: Vec<Value>,
+    pub anofox_specs: Vec<Value>,
     pub structured_content: StructuredContent,
-    /// PNG bytes, present only when a surface asked for rasterization.
+    /// The preview PNG (the first chart, else the instance card), present
+    /// only when a surface asked for rasterization.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub png: Option<Vec<u8>>,
+    /// One PNG per chart, in layout order (rasterized surfaces only). Not
+    /// serialized — surfaces encode what they ship.
+    #[serde(skip)]
+    pub pngs: Vec<Vec<u8>>,
+}
+
+impl Artifact {
+    /// The painted SVG of every chart, in layout order (empty until the
+    /// render step paints them).
+    pub fn chart_svgs(&self) -> Vec<&str> {
+        self.a2ui
+            .get("components")
+            .and_then(Value::as_array)
+            .map(|cs| {
+                cs.iter()
+                    .filter(|c| c.get("kind").and_then(Value::as_str) == Some("anofox"))
+                    .filter_map(|c| c.get("svg").and_then(Value::as_str))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }

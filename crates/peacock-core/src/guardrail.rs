@@ -1,7 +1,10 @@
 //! Render guardrails (FR-V-4, NFR-S-3): a rendered artifact must not be able
 //! to fetch data or compute beyond the rows escurel released.
 //!
-//! The safe Vega-Lite subset peacock accepts:
+//! Authored charts are anofox role specs, guardrailed in [`crate::chart`].
+//! This module guards the Vega-Lite peacock still EMITS — the derived
+//! compatibility spec a Mosaic-mode view hands its client — and the Mosaic
+//! data-source reference. The safe Vega-Lite subset:
 //! - **inline data only** — `data.values` (peacock injects the escurel rows);
 //!   no `data.url` / `data.name` / remote loaders anywhere in the spec;
 //! - **declarative marks + encodings**, and simple field-predicate
@@ -38,23 +41,6 @@ const FORBIDDEN_KEYS: &[&str] = &["url", "expr", "signal", "signals", "calculate
 /// Validate a Vega-Lite spec against the safe subset. `data.values` is the
 /// only sanctioned data source.
 pub fn check_vega_spec(spec: &Value) -> Result<()> {
-    walk(spec)
-}
-
-/// The statistical geoms the stat-spec dialect declares (issue #6/#7). A
-/// spec is STATISTICAL when its JSON carries a top-level `geom` key
-/// (Vega-Lite uses `mark`, never `geom`).
-pub const STAT_GEOMS: &[&str] = peacock_types::StatGeom::ALL;
-
-/// Validate a STATISTICAL spec: the typed dialect parse
-/// ([`peacock_types::StatSpec::parse`] — known geom, known fields, typed
-/// annotations, geometry-conditional shape rules), the RowSet column
-/// cross-check for every aesthetic, and the same no-escape-hatch walk as
-/// [`check_vega_spec`]. Backend-independent: this runs at compose whether or
-/// not the `ggplot` rasterization feature is enabled.
-pub fn check_stat_spec(spec: &Value, columns: &[&str]) -> Result<()> {
-    let parsed = peacock_types::StatSpec::parse(spec)?;
-    parsed.check_columns(columns)?;
     walk(spec)
 }
 

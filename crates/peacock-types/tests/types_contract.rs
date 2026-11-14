@@ -125,7 +125,7 @@ fn param_schema_round_trips_and_typechecks_values() {
 // ── Artifact / StructuredContent (FR-R-3, FR-X-1) ──
 
 #[test]
-fn artifact_carries_a2ui_vega_structured_and_optional_png() {
+fn artifact_carries_a2ui_charts_structured_and_optional_png() {
     let sc = StructuredContent {
         rows: json!([{ "month": "1997-01-01", "category": "Beverages", "revenue": 100 }]),
         param_schema: json!({ "category": { "type": "string" } }),
@@ -133,19 +133,25 @@ fn artifact_carries_a2ui_vega_structured_and_optional_png() {
         instances: None,
         document: None,
     };
+    let panel = json!({ "rows": [{ "c0": "1997-01", "c1": 100 }], "roles": [[0, "XAXIS", "month"], [1, "LINECHART", "revenue"]] });
     let art = Artifact {
-        a2ui: json!({ "version": "0.9", "components": [] }),
-        vega_specs: vec![json!({ "mark": "line" })],
-        stat_specs: Vec::new(),
+        a2ui: json!({ "version": "0.9", "components": [
+            { "kind": "anofox", "spec": panel, "svg": "<svg/>" },
+            { "kind": "table", "rows": [] }
+        ] }),
+        vega_specs: vec![json!({ "mark": { "type": "line" } })],
+        anofox_specs: vec![panel],
         structured_content: sc,
         png: None,
+        pngs: Vec::new(),
     };
     let v = serde_json::to_value(&art).unwrap();
     assert_eq!(v["a2ui"]["version"], "0.9");
-    assert_eq!(v["vega_specs"][0]["mark"], "line");
-    // No stat spec authored ⇒ the field is absent from the wire shape, so
-    // pre-existing serialized artifacts stay byte-identical (issue #6).
-    assert!(v.get("stat_specs").is_none());
+    assert_eq!(v["vega_specs"][0]["mark"]["type"], "line");
+    assert_eq!(v["anofox_specs"][0]["roles"][1][1], "LINECHART");
+    // Per-chart PNGs never ride the serialized artifact.
+    assert!(v.get("pngs").is_none());
+    assert_eq!(art.chart_svgs(), vec!["<svg/>"]);
     // The current resolved params ride structuredContent (FR-X-1).
     assert_eq!(
         v["structured_content"]["current_params"]["category"],
