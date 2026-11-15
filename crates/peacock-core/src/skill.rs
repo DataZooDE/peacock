@@ -2,7 +2,7 @@
 //!
 //! A report is an escurel skill (`render: a2ui`) whose front matter declares
 //! render `params`, binds data by typed reference (`data`), lays out `views`,
-//! and carries named Vega-Lite `specs`. peacock resolves it via
+//! and carries named anofox chart `specs` (`roles:` over the view's columns). peacock resolves it via
 //! `escurel-client` (`resolve` + `expand`) and parses the frontmatter into
 //! this typed model. It executes no SQL and reads no credential.
 
@@ -23,11 +23,11 @@ pub enum ViewSpec {
         field: String,
         label: String,
     },
-    /// A chart: a named Vega-Lite spec rendered with the view's rows inline.
-    /// `spec_single` (optional) is used instead when the data resolves to a
-    /// single colour series — e.g. a stacked bar across categories, but a line
-    /// when drilled to one category.
-    Vega {
+    /// A chart (`kind: anofox`): a named anofox role spec rendered over the
+    /// view's rows. `spec_single` (optional) is used instead when the data
+    /// resolves to a single `CATEGORY` series — e.g. a stacked bar across
+    /// categories, but a line when drilled to one category.
+    Chart {
         data: String,
         spec: String,
         spec_single: Option<String>,
@@ -199,8 +199,13 @@ pub struct ReportSkill {
     /// Disjoint from `data` aliases by construction.
     pub instances: std::collections::BTreeMap<String, InstanceRef>,
     pub views: Vec<ViewSpec>,
-    /// Named Vega-Lite specs the `vega` views reference.
+    /// Named anofox chart specs (`{ roles, title?, … }`) the chart views
+    /// reference.
     pub specs: std::collections::BTreeMap<String, Value>,
+    /// A compiled anofox dashboard (`dashboard:` frontmatter, emitted by
+    /// `peacock author compile`). When set, the report renders the whole
+    /// dashboard instead of `views:`.
+    pub dashboard: Option<crate::dashboard::DashboardSpec>,
     /// The agent-authored narrative (skill body).
     pub narrative: String,
     /// `viewer:` — set on an INSTANCE skill page (account, email, …), read
@@ -261,16 +266,20 @@ impl ReportSkill {
             }
         }
 
-        let specs = fm
+        let specs: std::collections::BTreeMap<String, Value> = fm
             .get("specs")
             .and_then(Value::as_object)
             .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
             .unwrap_or_default();
-
+        // Views first: a removed `kind: vega` view is the clearer message.
         let views = parse_views(id, fm)?;
+        for (name, spec) in &specs {
+            check_spec_dialect(id, name, spec)?;
+        }
         let viewer = parse_viewer(id, fm)?;
         let actions = parse_actions(id, fm)?;
         let followups = parse_followups(id, fm)?;
+        let dashboard = crate::dashboard::DashboardSpec::from_frontmatter(id, fm)?;
 
         Ok(ReportSkill {
             id: id.to_owned(),
@@ -279,6 +288,7 @@ impl ReportSkill {
             instances,
             views,
             specs,
+            dashboard,
             narrative: body.to_owned(),
             viewer,
             actions,
@@ -485,13 +495,20 @@ fn parse_views(id: &str, fm: &Value) -> Result<Vec<ViewSpec>> {
                     .unwrap_or("Total")
                     .to_owned(),
             },
-            "vega" => ViewSpec::Vega {
+            "vega" => {
+                return Err(Error::render(format!(
+                    "report `{id}`: `kind: vega` views were removed (peacock#44) — migrate the \
+                     view to `kind: anofox` and its spec to anofox `roles:` (see the \
+                     peacock-platform skill, 01-report-skills)"
+                )));
+            }
+            "anofox" => ViewSpec::Chart {
                 data,
                 spec: v
                     .get("spec")
                     .and_then(Value::as_str)
                     .ok_or_else(|| {
-                        Error::render(format!("report `{id}`: a vega view names no `spec`"))
+                        Error::render(format!("report `{id}`: an anofox view names no `spec`"))
                     })?
                     .to_owned(),
                 spec_single: v
@@ -546,6 +563,25 @@ fn parse_views(id: &str, fm: &Value) -> Result<Vec<ViewSpec>> {
         out.push(view);
     }
     Ok(out)
+}
+
+/// Every named spec must be an anofox role spec. A Vega-Lite (`mark`,
+/// `encoding`, `$schema`) or statistical (`geom`) spec is the removed dialect
+/// (peacock#44) — a clear migration error, never a silent skip. The shape is
+/// guardrailed here; the column cross-check needs the rows and runs at compose.
+fn check_spec_dialect(id: &str, name: &str, spec: &Value) -> Result<()> {
+    if let Some(old) = ["mark", "encoding", "$schema", "geom", "layer"]
+        .into_iter()
+        .find(|k| spec.get(k).is_some())
+    {
+        return Err(Error::render(format!(
+            "report `{id}`: spec `{name}` is a Vega-Lite / `geom:` spec (it has `{old}`); \
+             peacock now renders anofox specs — write `roles: [[column, ROLE], …]` instead \
+             (peacock#44)"
+        )));
+    }
+    crate::chart::check_spec_shape(spec)
+        .map_err(|e| Error::render(format!("report `{id}`: spec `{name}`: {e}")))
 }
 
 /// The `instance:` alias an instance view targets (required).

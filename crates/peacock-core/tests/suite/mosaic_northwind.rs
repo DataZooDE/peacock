@@ -42,9 +42,9 @@ async fn oversize_view_renders_in_mosaic_mode_referencing_the_escurel_query() {
     assert_eq!(source["params"]["to"], "1997-12-31");
 
     // The Mosaic spec carries the vgplot mark + encodings derived from the
-    // report's Vega-Lite spec (a scatter/point over discount vs. revenue).
+    // report's anofox spec (a scatter/point over discount vs. revenue).
     let spec = &mosaic["artifact"]["spec"];
-    assert_eq!(spec["mark"], "point");
+    assert_eq!(spec["mark"]["type"], "point");
     assert!(spec["encoding"]["x"]["field"].is_string());
 
     // (b) the big rows are NOT inlined anywhere in the Mosaic component.
@@ -91,12 +91,12 @@ async fn no_threshold_still_renders_the_normal_inline_chart() {
         comps.iter().all(|c| c["kind"] != "mosaic"),
         "no mosaic component without a threshold"
     );
-    let vega = comps
+    let chart = comps
         .iter()
-        .find(|c| c["kind"] == "vega")
+        .find(|c| c["kind"] == "anofox")
         .expect("the normal inline chart is present");
     assert!(
-        vega["spec"]["data"]["values"].as_array().unwrap().len() > 5,
+        chart["spec"]["rows"].as_array().unwrap().len() > 5,
         "rows are inlined in the normal chart"
     );
 

@@ -9,7 +9,10 @@ use peacock_test_support::{NW_REPORT, NorthwindEscurel};
 use serde_json::{Value, json};
 
 async fn start() -> (NorthwindEscurel, String) {
-    let nw = NorthwindEscurel::spawn().await;
+    serve_on(NorthwindEscurel::spawn().await).await
+}
+
+async fn serve_on(nw: NorthwindEscurel) -> (NorthwindEscurel, String) {
     let state = Arc::new(AppState {
         escurel: EscurelData::new(nw.endpoint()),
         principal: nw.sales_principal(),
@@ -17,7 +20,7 @@ async fn start() -> (NorthwindEscurel, String) {
         demo_html: "<!doctype html><title>peacock demo</title>",
         flutter_dir: None,
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });
@@ -168,7 +171,7 @@ async fn start_with_flutter() -> (NorthwindEscurel, String, tempfile::TempDir) {
         demo_html: "<!doctype html><title>peacock demo</title>",
         flutter_dir: Some(dir.path().to_path_buf()),
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });
@@ -218,5 +221,76 @@ async fn flutter_bundle_and_mcp_shim_are_served() {
         html.contains("mcp:callServerTool") && html.contains("mcp:updateModelContext"),
         "shim relays the MCP-Apps verbs"
     );
+    nw.shutdown().await;
+}
+
+/// J3 (#44): a backend calls the structured surface for a report with SEVERAL
+/// charts and gets every one — panel spec, painted SVG — not just the first
+/// (the old engine rasterized only the first chart). The chartable ones also
+/// carry the derived Vega-Lite; a heatmap has none.
+#[tokio::test]
+async fn structured_render_returns_every_chart() {
+    let overview = r#"---
+kind: skill
+id: northwind-overview
+render: a2ui
+params:
+  from:     { type: date,   default: "1997-01-01" }
+  to:       { type: date,   default: "1997-12-31" }
+  category: { type: string, default: "ALL" }
+data:
+  rev: "[[query::nw_revenue_by_category]]"
+views:
+  - { kind: kpi,    data: rev, agg: sum, field: revenue, label: "Total revenue" }
+  - { kind: anofox, data: rev, spec: by_month }
+  - { kind: anofox, data: rev, spec: share }
+  - { kind: anofox, data: rev, spec: season }
+specs:
+  by_month: { title: Revenue by month, roles: [[month, XAXIS], [category, CATEGORY], [revenue, BARCHART_STACKED, Revenue]] }
+  share:    { title: Revenue share, roles: [[category, CATEGORY], [revenue, DONUT, Revenue]] }
+  season:     { title: Seasonality, roles: [[month, XAXIS], [category, YAXIS], [revenue, HEATMAP, Revenue]] }
+---
+Overview.
+"#;
+    let nw = NorthwindEscurel::spawn_with(peacock_test_support::NorthwindOpts {
+        extra_skills: vec![("northwind-overview".into(), overview.into())],
+        ..Default::default()
+    })
+    .await;
+    let (nw, base) = serve_on(nw).await;
+
+    let body: Value = reqwest::Client::new()
+        .post(format!("{base}/v1/render_report"))
+        .json(&json!({ "report_id": "northwind-overview", "png": true }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(body.get("error").is_none(), "{body}");
+
+    let svgs = body["svgs"].as_array().expect("svgs");
+    assert_eq!(svgs.len(), 3, "every chart is painted");
+    for (svg, title) in svgs
+        .iter()
+        .zip(["Revenue by month", "Revenue share", "Seasonality"])
+    {
+        assert!(svg.as_str().unwrap().contains(title), "{title}");
+    }
+    assert_eq!(body["anofox_specs"].as_array().unwrap().len(), 3);
+    let marks: Vec<&str> = body["vega_specs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["mark"]["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        marks,
+        vec!["bar", "arc"],
+        "bar + donut derive; the heatmap does not"
+    );
+    assert!(body["png_base64"].as_str().is_some_and(|p| p.len() > 1000));
+
     nw.shutdown().await;
 }

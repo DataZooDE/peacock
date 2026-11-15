@@ -15,7 +15,7 @@ frontend / chat ──► TRITON (gateway: protocol adapters + auth)
 ```
 
 - **One render core.** `render(report_id, params, principal, escurel)`
-  → an `Artifact { a2ui, vega_specs, structured_content, png? }`. Every
+  → an `Artifact { a2ui, anofox_specs, vega_specs (derived), structured_content, png? }`. Every
   surface funnels through it; a drill is a fresh render from the
   **absolute** param vector (no server-side UI state).
 - **Four surfaces**: MCP App (`tools/call render_report` +
@@ -31,7 +31,7 @@ frontend / chat ──► TRITON (gateway: protocol adapters + auth)
 - **Theming lives here** — see `references/04`. One CSS file of
   `--pk-*` tokens themes charts, iframes and chat-card chrome alike.
 
-What renders: row reports (KPI / Vega-Lite chart / table over query
+What renders: row reports (KPI / anofox chart / table over query
 rows), instance reports (an escurel RECORD: frontmatter facts /
 markdown / event timeline), and documents (any instance page via the
 reserved `document` pseudo-report — `references/02`).

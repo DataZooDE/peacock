@@ -4,6 +4,20 @@ The skill version tracks the consumer-facing contract; the peacock
 repo's checked-out git ref is the true version pin (see `SKILL.md` →
 "How this skill is installed").
 
+## 0.2.0 — anofox-visualization charts (BREAKING, peacock#44)
+
+- Charts are `kind: anofox` views over anofox **role specs**
+  (`roles: [[column, ROLE, name?], …]`). `kind: vega` views, Vega-Lite
+  (`mark`/`encoding`) and `geom:` specs are rejected with a migration error.
+- `render_report` takes `variant` (light|dark) and `locale`; `_meta` gains
+  `svgs` (the painted charts); `vega_specs` is now a **derived** minimal
+  Vega-Lite for native-chart hosts (bar/line/area/scatter/pie/donut only).
+- Every chart of a report is painted, not only the first.
+- New: whole anofox `dashboard.sql` reports via `peacock author compile`
+  (lint gate → one escurel query page per statement + the report skill).
+- `GET /ui/<report>` serves the `ui://peacock` runtime standalone; the
+  runtime shows the interactive SVG (hover values, click-to-drill).
+
 ## 0.1.1 — escurel `kind:` release
 
 Follows the escurel BREAKING release (see escurel's `docs/deploy/consumer-rollout.md`):

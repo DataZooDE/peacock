@@ -1,7 +1,7 @@
 ---
 name: peacock-platform
 version: 0.1.0
-description: Use when building an application that integrates with Peacock, the DataZoo report renderer + MCP-App host — authoring escurel report skills it renders (params/data/instances/views/specs frontmatter), referencing reports from an agent's surface (render_report button + ui://peacock resource), opening instance DOCUMENTS from chat replies (the reserved `document` pseudo-report, skill-page `viewer:`/`actions:`, emit_document_event), theming a deployment (PEACOCK_BRAND_CSS, --pk-* tokens, get_theme), or writing no-mock integration tests (PeacockProcess, NorthwindEscurel). Triggers on phrases like "render a report", "report skill page", "ui://peacock", "render_report", "instance report", "document view", "viewer frontmatter", "actions frontmatter", "emit_document_event", "get_theme", "PEACOCK_BRAND_CSS", "pk tokens", "Vega-Lite report", "PeacockProcess". DO NOT use for peacock-internal work (the composer, the rasterizer, the guardrails, the iframe runtime) — that is a PR against the peacock repo itself, not consumer-facing.
+description: Use when building an application that integrates with Peacock, the DataZoo report renderer + MCP-App host — authoring escurel report skills it renders (params/data/instances/views/specs frontmatter), referencing reports from an agent's surface (render_report button + ui://peacock resource), opening instance DOCUMENTS from chat replies (the reserved `document` pseudo-report, skill-page `viewer:`/`actions:`, emit_document_event), theming a deployment (PEACOCK_BRAND_CSS, --pk-* tokens, get_theme), or writing no-mock integration tests (PeacockProcess, NorthwindEscurel). Triggers on phrases like "render a report", "report skill page", "ui://peacock", "render_report", "instance report", "document view", "viewer frontmatter", "actions frontmatter", "emit_document_event", "get_theme", "PEACOCK_BRAND_CSS", "pk tokens", "anofox chart", "roles spec", "dashboard.sql", "peacock author compile", "PeacockProcess". DO NOT use for peacock-internal work (the composer, the chart engine bridge, the guardrails, the iframe runtime) — that is a PR against the peacock repo itself, not consumer-facing.
 ---
 
 # peacock-platform — build apps that integrate with Peacock
@@ -9,7 +9,7 @@ description: Use when building an application that integrates with Peacock, the 
 You are helping someone integrate with **Peacock**, the DataZoo
 platform's stateless **report renderer + MCP-App host**. Peacock
 compiles an **escurel report skill + params** into one artifact — A2UI
-layout + Vega-Lite charts + `structuredContent` + an on-demand themed
+layout + anofox-visualization charts + `structuredContent` + an on-demand themed
 PNG — and serves it on four surfaces (MCP App `ui://`, chat-via-Triton,
 structured JSON, embedded). It reads **ACL-checked rows and pages from
 escurel only** (the caller's bearer forwarded per request); it holds no

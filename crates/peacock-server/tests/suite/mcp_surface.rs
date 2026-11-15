@@ -19,7 +19,7 @@ async fn start() -> (NorthwindEscurel, String) {
         demo_html: "<!doctype html>",
         flutter_dir: None,
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });
@@ -143,7 +143,7 @@ async fn resources_read_serves_the_flutter_shim_when_app_url_is_set() {
         demo_html: "<!doctype html>",
         flutter_dir: None,
         flutter_app_url: Some("http://peacock.example/app/".into()),
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });
@@ -243,7 +243,7 @@ async fn start_with_customer_report() -> (NorthwindEscurel, String) {
         demo_html: "<!doctype html>",
         flutter_dir: None,
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });
@@ -453,7 +453,7 @@ async fn start_with_actions() -> (NorthwindEscurel, String) {
         demo_html: "<!doctype html>",
         flutter_dir: None,
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });
@@ -688,7 +688,7 @@ async fn get_theme_returns_the_resolved_brand_as_data() {
     // In-proc state with a registered brand (what PEACOCK_BRAND_CSS does at
     // boot): the tool returns the RESOLVED chrome + css for tenant ⊕ host.
     let nw = NorthwindEscurel::spawn().await;
-    let mut themes = peacock_rasterizer::ThemeRegistry::builtin();
+    let mut themes = peacock_theme::ThemeRegistry::builtin();
     themes.register_brand(
         "acme",
         ":root { --pk-name: \"DataZoo\"; --pk-brand: #1a73e8; \

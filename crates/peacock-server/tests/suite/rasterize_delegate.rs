@@ -23,7 +23,7 @@ async fn start_peacock() -> (NorthwindEscurel, std::net::SocketAddr) {
         demo_html: "<!doctype html>",
         flutter_dir: None,
         flutter_app_url: None,
-        themes: peacock_rasterizer::ThemeRegistry::builtin(),
+        themes: peacock_theme::ThemeRegistry::builtin(),
         triton_url: None,
         upstream_capture: Default::default(),
     });

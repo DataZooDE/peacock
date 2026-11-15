@@ -12,5 +12,10 @@ workspace = true
 
 [dependencies]
 # Deliberately dependency-light: a theme is just CSS custom properties parsed
+# (serde_json only to emit the anofox theme JSON, issue #44)
 # into tokens. No serde/TOML — CSS is the source of truth (it styles the web
 # surfaces natively and peacock extracts the tokens it needs for the chart).
+serde_json = { workspace = true }
+
+[dev-dependencies]
+anofox-visualization = { workspace = true }

@@ -9,7 +9,8 @@ code, not a re-statement of the spec.
 peacock is the stateless **report renderer + MCP-App host** of the open
 agent-reporting architecture (escurel · peacock · triton). It compiles an
 escurel *report skill* + parameters into one artifact — A2UI v0.9 layout +
-Vega-Lite charts + structuredContent + on-demand PNG — and serves it on
+anofox-visualization charts (SVG, with a derived Vega-Lite for native-chart
+hosts) + structuredContent + on-demand PNG — and serves it on
 four surfaces (MCP App, chat-via-Triton, structured, embedded library). It
 holds **no database credentials**; escurel is the only data path.
 
@@ -24,18 +25,23 @@ holds **no database credentials**; escurel is the only data path.
    tests are fine for the inner loop. The merge gate during bootstrap is an
    integration test that exercises the **real** component — real escurel
    (`EscurelProcess::spawn`), real Triton (`TritonProcess::spawn`), real
-   DuckDB, real Parquet, real vl-convert, a real browser for the iframe.
+   DuckDB, real Parquet, real anofox rendering, a real browser for the
+   iframe (`scripts/verify-ui.sh`: rodney → headless Chrome).
    **No `FakeEscurel`, no `mockall`, no test doubles at the boundary the
    test exists to cover.** If you cannot exercise the real component from a
    test, the test is not finished. (This is the project owner's explicit
    directive and supersedes HLD §8.6's FakeEscurel suggestion.)
 
 3. **Trust boundary is sacred.** peacock holds no DSN, no DB driver, no
-   credential, and constructs **no SQL string**. All data is ACL-checked
-   rows from escurel via `escurel-client`. Untrusted params travel as typed
-   values and are bound by escurel as prepared-statement parameters. A
-   static test (grep) asserts no SQL-construction / credential surface
-   exists in peacock (ACC-2, ACC-11).
+   credential, and its **render path constructs no SQL string**. All data is
+   ACL-checked rows from escurel via `escurel-client`. Untrusted params
+   travel as typed values and are bound by escurel as prepared-statement
+   parameters. The one place peacock touches SQL text is author time:
+   `peacock author compile` (in `peacock-bin`) rewrites an author's anofox
+   `dashboard.sql` into escurel query pages; the render crates only read
+   those pages by reference. Static tests (grep) assert no SQL-construction
+   / credential surface in peacock and no SQL planning or building in the
+   render crates (ACC-2, ACC-11).
 
 4. **One render core; surfaces are thin shells.** `(report skill, params,
    rows) → artifact` is the single pivot every surface funnels through
@@ -56,9 +62,12 @@ holds **no database credentials**; escurel is the only data path.
    small, well-named public APIs. Crates: `peacock-types` (artifact, params,
    errors, principal, manifest), `peacock-theme` (CSS `--pk-*` tokens, host
    ⊕ brand composition), `peacock-core` (render core: resolve · read ·
-   compose · guardrails, with an optional wire-trace sink), `peacock-rasterizer`
-   (pure-Rust Vega-Lite → SVG → PNG + theme application), `peacock-server`
-   (surfaces + obs + lifecycle), `peacock-bin` (CLI/settings/manifest/signals),
+   compose · guardrails, with an optional wire-trace sink; `chart` wraps the
+   anofox-visualization engine — role specs → SVG → PNG, the derived
+   Vega-Lite — and `dashboard` renders compiled anofox dashboards),
+   `peacock-server`
+   (surfaces + obs + lifecycle), `peacock-bin` (CLI/settings/manifest/signals,
+   `author validate|scaffold|preview|compile`),
    `peacock-test-support` (`PeacockProcess` + Northwind fixtures + scenario
    reports), `peacock-demo` (the Copilot-style verification demo).
 
@@ -67,7 +76,7 @@ holds **no database credentials**; escurel is the only data path.
    a question rather than picking.
 
 9. **Future-notes for discovered problems.** When a non-obvious problem is
-   fixed (a vl-convert quirk, a DuckDB parquet-dir gotcha, a Flutter
+   fixed (an anofox rendering quirk, a DuckDB parquet-dir gotcha, a Flutter
    semantics-label trap), write a short note under
    [`doc/notes/discovered/`](doc/notes/discovered/) as `<YYYY-MM-DD>-<slug>.md`:
    symptom, fix, how to recognise it next time. Don't rediscover twice.
@@ -97,14 +106,21 @@ test target's root file resolves `mod x;` against its *own* directory.
 Why: each of those binaries statically links the escurel gateway and libduckdb
 at ~490-620 MB. Before this, the workspace built 48 test binaries totalling
 15.3 GB; it now builds 27 totalling 0.85 GB. The smaller crates
-(`peacock-rasterizer`, `peacock-ggplot`, `peacock-types`, `peacock-theme`) are
+(`peacock-types`, `peacock-theme`) are
 deliberately untouched — at 7-41 MB a binary the churn and the lost process
 isolation buy nothing. See
 [`doc/notes/discovered/2026-08-29-release-split-and-rsa-keygen.md`](doc/notes/discovered/2026-08-29-release-split-and-rsa-keygen.md).
 
 ## Cross-repo dependencies (coordination)
 
-peacock path-depends on two sibling repos under `/home/jr/Projects/datazoo`:
+peacock path-depends on two sibling repos under `/home/jr/Projects/datazoo`
+(escurel, triton) and git-depends on a third:
+
+- **anofox-visualization** — the chart engine (issue #44), a git dependency
+  pinned by CalVer tag in the workspace `Cargo.toml` (not on crates.io; no
+  features — peacock uses only the pure plan/render/theme/lint core, never
+  anofox's own server or SQL execution). Upgrading is an explicit PR that
+  bumps the tag.
 
 - **escurel** — `escurel-client` (resolve/expand/**`query_instance`**),
   `escurel-types`, `escurel-test-support` (`EscurelProcess`,

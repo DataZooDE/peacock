@@ -189,6 +189,26 @@ jobs:
         working-directory: peacock
         run: cargo test --workspace --doc
 
+      # J7 (#44): the ui://peacock runtime in a real headless browser — hover a
+      # chart mark for its value, click it to drill. rodney (via uvx) drives
+      # the runner's preinstalled Chrome against peacock-demo (real escurel +
+      # peacock); the debug build is already warm from `cargo test`.
+      - name: Install uv (for rodney)
+        uses: astral-sh/setup-uv@v6
+
+      - name: verify-ui (browser E2E)
+        working-directory: peacock
+        timeout-minutes: 15
+        run: scripts/verify-ui.sh
+
+      - name: Upload verify-ui screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-ui
+          path: peacock/target/verify-ui/
+          if-no-files-found: ignore
+
 
   # `cargo build --release` in its OWN job — second attempt.
   #
@@ -304,9 +324,13 @@ jobs:
           sudo swapon /swapfile
           free -h
 
+      # Pinned (main's last green version): an unpinned `stable` drifted to a
+      # release that deprecates `package:flutter/material.dart`, and
+      # `flutter analyze` fails on that info. Bump deliberately.
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.47.7
       - name: Build the peacock-web bundle
         working-directory: web/peacock-web
         run: |

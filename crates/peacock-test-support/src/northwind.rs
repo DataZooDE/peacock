@@ -31,9 +31,8 @@ pub const NW_QUERY_LINES: &str = "nw_order_line_values";
 /// Revenue per salesperson, ranked best-first (horizontal leaderboard).
 pub const NW_REPORT_LEADERBOARD: &str = "northwind-salesperson-leaderboard";
 pub const NW_QUERY_LEADERBOARD: &str = "nw_revenue_by_salesperson";
-/// Order-line revenue distribution — a STATISTICAL spec (`geom: histogram`)
-/// for the pluggable `ggplot` backend (issue #6). NOT part of the default
-/// seed: pass it via [`NorthwindOpts::extra_skills`] with
+/// Order-line revenue distribution — an anofox `HISTOGRAM` panel. NOT part of
+/// the default seed: pass it via [`NorthwindOpts::extra_skills`] with
 /// [`skill_report_distribution`].
 pub const NW_REPORT_DISTRIBUTION: &str = "northwind-revenue-distribution";
 
@@ -114,7 +113,7 @@ fn query_revenue_by_category() -> String {
 
 /// The `northwind-monthly-revenue` report skill (the paper's example):
 /// render params, data bound by reference to the query page, the view layout,
-/// and the named Vega-Lite chart spec.
+/// and the named anofox chart specs.
 ///
 /// Exposed (via the [`skill_report_markdown`] re-export) so authoring-tooling
 /// tests can feed the canonical valid skill to `peacock author validate` /
@@ -137,30 +136,29 @@ data:
   rev_by_cat: "[[query::nw_revenue_by_category]]"
 views:
   - { kind: kpi,   data: rev_by_cat, agg: sum, field: revenue, label: "Total revenue" }
-  - { kind: vega,  data: rev_by_cat, spec: rev_bar, spec_single: rev_line }
-  - { kind: table, data: rev_by_cat }
+  - { kind: anofox, data: rev_by_cat, spec: rev_bar, spec_single: rev_line }
+  - { kind: table,  data: rev_by_cat }
 specs:
   rev_bar:
-    mark: bar
-    encoding:
-      x:     { field: month,    type: ordinal,      title: Month }
-      y:     { field: revenue,  type: quantitative, aggregate: sum, title: Revenue }
-      color: { field: category, type: nominal }
+    title: Revenue by category
+    roles:
+      - [month, XAXIS]
+      - [category, CATEGORY]
+      - [revenue, BARCHART_STACKED, Revenue]
   rev_line:
-    mark: line
-    encoding:
-      x:     { field: month,    type: temporal,     title: Month }
-      y:     { field: revenue,  type: quantitative, aggregate: sum, title: Revenue }
-      color: { field: category, type: nominal }
+    title: Revenue by category
+    roles:
+      - [month, XAXIS]
+      - [category, CATEGORY]
+      - [revenue, LINECHART, Revenue]
 ---
 Revenue is recognised at order date, net of line discount. EMEA orders only.
 "#
     .to_owned()
 }
 
-/// The `northwind-revenue-distribution` report skill: a STATISTICAL spec
-/// (top-level `geom`, issue #6) over the raw order-line values — the ggplot
-/// backend's histogram. Not seeded by default (the base Northwind world stays
+/// The `northwind-revenue-distribution` report skill: an anofox histogram over
+/// the raw order-line values. Not seeded by default (the base Northwind world stays
 /// byte-identical); tests opt in via [`NorthwindOpts::extra_skills`].
 pub fn skill_report_distribution() -> String {
     r#"---
@@ -174,13 +172,12 @@ params:
 data:
   line_values: "[[query::nw_order_line_values]]"
 views:
-  - { kind: vega, data: line_values, spec: revenue_hist }
+  - { kind: anofox, data: line_values, spec: revenue_hist }
 specs:
   revenue_hist:
-    geom: histogram
-    x: revenue
-    bins: 20
     title: Order-line revenue distribution
+    roles:
+      - [revenue, HISTOGRAM, Revenue]
 ---
 Distribution of individual order-line revenue; EMEA orders only.
 "#
@@ -283,15 +280,14 @@ data:
   by_product: "[[query::nw_revenue_by_product]]"
 views:
   - { kind: kpi,   data: by_product, agg: sum, field: revenue, label: "Total revenue" }
-  - { kind: vega,  data: by_product, spec: prod_bar }
-  - { kind: table, data: by_product }
+  - { kind: anofox, data: by_product, spec: prod_bar }
+  - { kind: table,  data: by_product }
 specs:
   prod_bar:
-    mark: bar
-    encoding:
-      x:     { field: product, type: ordinal,      title: Product }
-      y:     { field: revenue, type: quantitative, title: Revenue }
-      color: { field: product, type: nominal }
+    title: Top products
+    roles:
+      - [product, XAXIS]
+      - [revenue, BARCHART, Revenue]
 ---
 Best-selling products by net revenue, highest first. EMEA orders only.
 "#
@@ -312,14 +308,14 @@ data:
   by_country: "[[query::nw_revenue_by_country]]"
 views:
   - { kind: kpi,   data: by_country, agg: sum, field: revenue, label: "Total revenue" }
-  - { kind: vega,  data: by_country, spec: country_pie }
-  - { kind: table, data: by_country }
+  - { kind: anofox, data: by_country, spec: country_pie }
+  - { kind: table,  data: by_country }
 specs:
   country_pie:
-    mark: { type: arc, innerRadius: 60 }
-    encoding:
-      theta: { field: revenue, type: quantitative }
-      color: { field: country, type: nominal }
+    title: Revenue share by country
+    roles:
+      - [country, CATEGORY]
+      - [revenue, DONUT, Revenue]
 ---
 Where the revenue comes from, by destination country. EMEA orders only.
 "#
@@ -341,15 +337,15 @@ data:
   rev_by_cat: "[[query::nw_revenue_by_category]]"
 views:
   - { kind: kpi,   data: rev_by_cat, agg: max, field: revenue, label: "Peak month revenue" }
-  - { kind: vega,  data: rev_by_cat, spec: season_heat }
-  - { kind: table, data: rev_by_cat }
+  - { kind: anofox, data: rev_by_cat, spec: season_heat }
+  - { kind: table,  data: rev_by_cat }
 specs:
   season_heat:
-    mark: rect
-    encoding:
-      x:     { field: month,    type: ordinal, title: Month }
-      y:     { field: category, type: nominal, title: Category }
-      color: { field: revenue,  type: quantitative, title: Revenue }
+    title: Revenue seasonality
+    roles:
+      - [month, XAXIS]
+      - [category, YAXIS]
+      - [revenue, HEATMAP, Revenue]
 ---
 Which categories peak in which months. Darker = more revenue. EMEA orders only.
 "#
@@ -370,25 +366,24 @@ data:
   lines: "[[query::nw_order_line_values]]"
 views:
   - { kind: kpi,   data: lines, agg: avg, field: discount_pct, label: "Avg discount %" }
-  - { kind: vega,  data: lines, spec: disc_scatter }
-  - { kind: table, data: lines }
+  - { kind: anofox, data: lines, spec: disc_scatter }
+  - { kind: table,  data: lines }
 specs:
   disc_scatter:
-    mark: point
-    encoding:
-      x:     { field: discount_pct, type: quantitative, title: "Discount %" }
-      y:     { field: revenue,      type: quantitative, title: "Line revenue" }
-      size:  { field: quantity,     type: quantitative, title: Quantity }
-      color: { field: category,     type: nominal }
+    title: Discount vs. line revenue
+    roles:
+      - [discount_pct, XAXIS, "Discount %"]
+      - [revenue, SCATTER, "Line revenue"]
+      - [quantity, SIZE, Quantity]
+      - [category, CATEGORY]
 ---
 Does discounting drive bigger orders? Each point is one order line. EMEA only.
 "#
     .to_owned()
 }
 
-/// Who sold the most — a horizontal, best-first leaderboard. Exercises the
-/// rasterizer's horizontal bars (categories on y) + explicit `sort` by
-/// another field (peacock #4/#5).
+/// Who sold the most — a best-first leaderboard (the query orders reps by
+/// revenue desc, so the bars read as a ranking).
 fn skill_report_leaderboard() -> String {
     r#"---
 kind: skill
@@ -402,15 +397,14 @@ data:
   by_rep: "[[query::nw_revenue_by_salesperson]]"
 views:
   - { kind: kpi,   data: by_rep, agg: max, field: revenue, label: "Top seller revenue" }
-  - { kind: vega,  data: by_rep, spec: rep_bar }
-  - { kind: table, data: by_rep }
+  - { kind: anofox, data: by_rep, spec: rep_bar }
+  - { kind: table,  data: by_rep }
 specs:
   rep_bar:
-    mark: bar
-    encoding:
-      y:     { field: salesperson, type: nominal, title: Salesperson, sort: { field: revenue, order: descending } }
-      x:     { field: revenue,     type: quantitative, title: Revenue }
-      color: { field: salesperson, type: nominal }
+    title: Revenue per salesperson
+    roles:
+      - [salesperson, XAXIS, Salesperson]
+      - [revenue, BARCHART, Revenue]
 ---
 Who sold the most, best first. Net revenue, EMEA orders only.
 "#
@@ -582,3 +576,34 @@ impl NorthwindEscurel {
         self.process.shutdown().await;
     }
 }
+
+/// The Northwind 1997 revenue **dashboard** as an anofox `dashboard.sql`
+/// (issue #44): a heading, a revenue KPI, revenue per month stacked by
+/// category, and the category share as a donut — over the `order_lines`
+/// source table, `from`/`to` read with `getvariable(...)`. `peacock author
+/// compile` turns each statement into an escurel query page over
+/// [`NW_DASHBOARD_TARGET`].
+pub fn northwind_dashboard_sql() -> String {
+    r#"-- Northwind revenue 1997 (EMEA), as an anofox dashboard.
+SELECT 'Northwind revenue (EMEA)'::LABEL;
+
+SELECT sum(unit_price * quantity * (1 - discount)) AS "Revenue"::KPI
+FROM order_lines
+WHERE order_date BETWEEN getvariable('from') AND getvariable('to');
+
+SELECT date_trunc('month', order_date)::XAXIS, category::CATEGORY,
+       sum(unit_price * quantity * (1 - discount)) AS "Revenue"::BARCHART_STACKED
+FROM order_lines
+WHERE order_date BETWEEN getvariable('from') AND getvariable('to')
+GROUP BY ALL ORDER BY 1, 2;
+
+SELECT category::CATEGORY, sum(unit_price * quantity * (1 - discount)) AS "Revenue"::DONUT
+FROM order_lines
+WHERE order_date BETWEEN getvariable('from') AND getvariable('to')
+GROUP BY ALL ORDER BY 2 DESC;
+"#
+    .to_owned()
+}
+
+/// The managed view the compiled dashboard's query pages read (`{{target}}`).
+pub const NW_DASHBOARD_TARGET: &str = "[[nw_order_lines::eu]]";

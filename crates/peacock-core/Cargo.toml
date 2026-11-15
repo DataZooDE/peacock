@@ -10,17 +10,14 @@ repository.workspace = true
 [lints]
 workspace = true
 
-[features]
-# The pluggable statistical render backend (issue #6): compiles the
-# plotters/ggplot-rs graph and dispatches STATISTICAL specs (top-level
-# `geom`) to it. Off by default — the base build and the Vega-Lite path are
-# unchanged without it.
-ggplot = ["dep:peacock-ggplot"]
-
 [dependencies]
 peacock-types = { workspace = true }
-peacock-rasterizer = { workspace = true }
-peacock-ggplot = { workspace = true, optional = true }
+anofox-visualization = { workspace = true }
+peacock-theme = { workspace = true }
+resvg = { workspace = true }
+usvg = { workspace = true }
+tiny-skia = { workspace = true }
+sha2 = { workspace = true }
 escurel-client = { workspace = true }
 escurel-types = { workspace = true }
 serde = { workspace = true }

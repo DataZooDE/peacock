@@ -10,14 +10,10 @@ repository.workspace = true
 [lints]
 workspace = true
 
-[features]
-# Forward to the render core's statistical backend (issue #6).
-ggplot = ["peacock-core/ggplot"]
-
 [dependencies]
 peacock-types = { workspace = true }
 peacock-core = { workspace = true }
-peacock-rasterizer = { workspace = true }
+peacock-theme = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -32,7 +28,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 [dev-dependencies]
 peacock-test-support = { path = "../peacock-test-support" }
-peacock-rasterizer = { workspace = true }
 escurel-client = { workspace = true }
 escurel-test-support = { workspace = true }
 triton-tests = { workspace = true }

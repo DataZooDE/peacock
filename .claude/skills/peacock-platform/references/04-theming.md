@@ -2,8 +2,10 @@
 
 **One CSS file is the single source of truth.** A theme is a set of
 `--pk-*` custom properties; web surfaces consume the CSS natively
-(`__THEME_CSS__` spliced into the iframe), the rasterizer extracts the
-same tokens to style chart PNGs and instance cards, and chat adapters
+(`__THEME_CSS__` spliced into the iframe), the same tokens become an
+anofox theme (`ThemeTokens::to_anofox_json`: `--pk-cat-*` → palette,
+`--pk-brand` → accent/link/sequential high end, `--pk-surface` → card, …)
+that paints the charts, KPI tiles and instance cards, and chat adapters
 fetch the resolved values for their card chrome via `get_theme`. Chart,
 iframe and chat card always match, from one definition. There is **no
 theme config anywhere else** — the old Triton manifest `theme:` block

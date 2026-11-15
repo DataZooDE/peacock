@@ -14,7 +14,6 @@ const PROD_CRATES: &[&str] = &[
     "peacock-core",
     "peacock-server",
     "peacock-bin",
-    "peacock-ggplot",
 ];
 
 /// High-signal substrings that would betray a credential/driver/SQL surface.
@@ -68,6 +67,52 @@ fn production_crates_have_no_credential_or_sql_surface() {
     assert!(
         hits.is_empty(),
         "credential/SQL surface detected:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// Issue #44: dashboard SQL is compiled into escurel query pages at AUTHOR
+/// time (`peacock author compile`, in `peacock-bin`). The RENDER crates only
+/// hand an authored script to anofox's pure renderer and answer its reads
+/// from compiled query pages by hash — they never plan, rewrite or build a
+/// statement themselves.
+#[test]
+fn render_crates_never_plan_or_build_sql() {
+    const RENDER_CRATES: &[&str] = &["peacock-types", "peacock-core", "peacock-server"];
+    const SQL_BUILDING: &[&str] = &[
+        "sql::plan",
+        "lint::check",
+        "getvariable",
+        "\"SELECT ",
+        "format!(\"SELECT",
+        "\"WITH ",
+    ];
+    let root = workspace_root();
+    let mut hits = Vec::new();
+    for crate_name in RENDER_CRATES {
+        let mut stack = vec![root.join("crates").join(crate_name).join("src")];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let body = std::fs::read_to_string(&path).unwrap_or_default();
+                    for needle in SQL_BUILDING {
+                        if body.contains(needle) {
+                            hits.push(format!("{} contains `{needle}`", path.display()));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        hits.is_empty(),
+        "SQL planning/building in a render crate:\n{}",
         hits.join("\n")
     );
 }

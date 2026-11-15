@@ -272,6 +272,15 @@ acl: { read: [sales], update: [analyst] }
 Revenue is recognised at order date, net of line discount. EMEA orders only.
 ```
 
+> **Implementation note (2026-11, peacock#44).** The shipped renderer has
+> since replaced Vega-Lite as the *authored* chart language with
+> **anofox-visualization** role specs (`roles: [[month, XAXIS], [category,
+> CATEGORY], [revenue, BARCHART_STACKED]]`), painted to deterministic SVG by
+> its pure-Rust core and rasterized in-process; Vega-Lite survives as a
+> *derived* output for native-chart surfaces. Whole anofox `dashboard.sql`
+> scripts are compiled at author time into escurel query pages, so the trust
+> boundary below is unchanged. The text describes the original design.
+
 `render_report(skill, params)` resolves this skill, reads rows via
 `query_instance` (§2.3), and composes three coupled outputs in one pass:
 an **A2UI v0.9** layout document (KPI tile, chart, table)[^a2ui]; the chart

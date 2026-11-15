@@ -17,8 +17,8 @@ path = "src/main.rs"
 
 [dependencies]
 peacock-core = { workspace = true }
+peacock-theme = { workspace = true }
 peacock-server = { workspace = true }
-peacock-rasterizer = { workspace = true }
 peacock-test-support = { path = "../peacock-test-support" }
 triton-tests = { workspace = true }
 tokio = { workspace = true }

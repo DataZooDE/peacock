@@ -51,6 +51,7 @@ fn report(specs: Value, views: Vec<ViewSpec>) -> ReportSkill {
         instances: BTreeMap::new(),
         views,
         specs: specs.as_object().unwrap().clone().into_iter().collect(),
+        dashboard: None,
         narrative: "EMEA orders only.".into(),
         viewer: None,
         actions: Vec::new(),
@@ -60,12 +61,11 @@ fn report(specs: Value, views: Vec<ViewSpec>) -> ReportSkill {
 
 fn rev_line_spec() -> Value {
     json!({
-        "mark": "line",
-        "encoding": {
-            "x": { "field": "month", "type": "temporal", "title": "Month" },
-            "y": { "field": "revenue", "type": "quantitative", "aggregate": "sum" },
-            "color": { "field": "category", "type": "nominal" }
-        }
+        "roles": [
+            ["month", "XAXIS"],
+            ["category", "CATEGORY"],
+            ["revenue", "LINECHART", "Revenue"]
+        ]
     })
 }
 
@@ -78,7 +78,7 @@ fn rows_map() -> BTreeMap<String, RowSet> {
 }
 
 #[test]
-fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
+fn composes_a2ui_v09_with_kpi_chart_inline_and_table() {
     let skill = report(
         json!({ "rev_line": rev_line_spec() }),
         vec![
@@ -88,7 +88,7 @@ fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
                 field: "revenue".into(),
                 label: "Total revenue".into(),
             },
-            ViewSpec::Vega {
+            ViewSpec::Chart {
                 data: "rev_by_cat".into(),
                 spec: "rev_line".into(),
                 spec_single: None,
@@ -112,7 +112,7 @@ fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
 
     assert_eq!(art.a2ui["version"], "0.9");
     let comps = art.a2ui["components"].as_array().unwrap();
-    // kpi, vega, table, text(narrative).
+    // kpi, chart, table, text(narrative).
     assert_eq!(comps.len(), 4);
 
     // KPI folds sum(revenue) = 180 + 81 + 110 = 371.
@@ -120,14 +120,15 @@ fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
     assert_eq!(kpi["kind"], "kpi");
     assert_eq!(kpi["value"].as_f64().unwrap(), 371.0);
 
-    // Vega component carries the spec with rows injected INLINE (FR-V-3) and
-    // no remote URL; the spec is also exposed separately (FR-V-1).
-    let vega = &comps[1];
-    assert_eq!(vega["kind"], "vega");
-    assert_eq!(vega["spec"]["data"]["values"].as_array().unwrap().len(), 3);
-    assert!(vega["spec"]["data"].get("url").is_none());
+    // The chart component carries the anofox panel with rows injected INLINE
+    // (FR-V-3); the spec is also exposed separately (FR-V-1), plus the
+    // derived Vega-Lite compatibility spec.
+    let chart = &comps[1];
+    assert_eq!(chart["kind"], "anofox");
+    assert_eq!(chart["spec"]["rows"].as_array().unwrap().len(), 3);
+    assert_eq!(art.anofox_specs.len(), 1);
     assert_eq!(art.vega_specs.len(), 1);
-    assert_eq!(art.vega_specs[0]["mark"], "line");
+    assert_eq!(art.vega_specs[0]["mark"]["type"], "line");
 
     // structuredContent carries rows + schema + current params (FR-X-1).
     assert_eq!(art.structured_content.rows.as_array().unwrap().len(), 3);
@@ -142,12 +143,12 @@ fn composes_a2ui_v09_with_kpi_vega_inline_and_table() {
 
 #[test]
 fn guardrail_rejects_remote_data_url() {
-    // ACC-4: a spec that loads remote data is a Render error.
+    // ACC-4: a spec that tries to bring its own data is a Render error.
     let mut spec = rev_line_spec();
-    spec["data"] = json!({ "url": "https://evil.example/rows.json" });
+    spec["url"] = json!("https://evil.example/rows.json");
     let skill = report(
         json!({ "rev_line": spec }),
-        vec![ViewSpec::Vega {
+        vec![ViewSpec::Chart {
             data: "rev_by_cat".into(),
             spec: "rev_line".into(),
             spec_single: None,
@@ -167,13 +168,13 @@ fn guardrail_rejects_remote_data_url() {
 }
 
 #[test]
-fn guardrail_rejects_expression_escape_hatch() {
-    // ACC-4: an arbitrary-expression feature is a Render error.
+fn guardrail_rejects_contract_plot_escape_hatch() {
+    // ACC-4: anofox's named contract plots bypass the role guardrail.
     let mut spec = rev_line_spec();
-    spec["transform"] = json!([{ "calculate": "datum.revenue * 1000", "as": "x" }]);
+    spec["plot"] = json!("terms");
     let skill = report(
         json!({ "rev_line": spec }),
-        vec![ViewSpec::Vega {
+        vec![ViewSpec::Chart {
             data: "rev_by_cat".into(),
             spec: "rev_line".into(),
             spec_single: None,
@@ -220,7 +221,7 @@ fn composition_is_pure_same_inputs_same_artifact() {
     let skill = report(
         json!({ "rev_line": rev_line_spec() }),
         vec![
-            ViewSpec::Vega {
+            ViewSpec::Chart {
                 data: "rev_by_cat".into(),
                 spec: "rev_line".into(),
                 spec_single: None,
@@ -285,6 +286,7 @@ fn instance_skill(views: Vec<ViewSpec>) -> ReportSkill {
         instances,
         views,
         specs: BTreeMap::new(),
+        dashboard: None,
         narrative: String::new(),
         viewer: None,
         actions: Vec::new(),
@@ -438,7 +440,7 @@ fn tagged_body_renders_views_inline_with_narrative_and_followups() {
     let kinds: Vec<&str> = comps.iter().map(|c| c["kind"].as_str().unwrap()).collect();
     assert_eq!(
         kinds,
-        vec!["text", "vega", "text", "button"],
+        vec!["text", "anofox", "text", "button"],
         "inline document order: narrative, chart, narrative, one re-ask button"
     );
     assert_eq!(
@@ -447,7 +449,7 @@ fn tagged_body_renders_views_inline_with_narrative_and_followups() {
         "no trailing narrative blob when the body is tagged"
     );
     assert!(
-        comps[1]["spec"]["data"]["values"].is_array(),
+        comps[1]["spec"]["rows"].is_array(),
         "the chart carries the escurel rows inline"
     );
     // The follow-up renders in the exact re-ask button shape the chat surfaces
@@ -602,7 +604,7 @@ fn untagged_body_keeps_classic_layout() {
     // narrative blob (byte-for-byte the pre-tags behaviour).
     let skill = report(
         json!({ "rev_line": rev_line_spec() }),
-        vec![ViewSpec::Vega {
+        vec![ViewSpec::Chart {
             data: "rev_by_cat".into(),
             spec: "rev_line".into(),
             spec_single: None,
@@ -620,5 +622,9 @@ fn untagged_body_keeps_classic_layout() {
     .unwrap();
     let comps = art.a2ui["components"].as_array().unwrap();
     let kinds: Vec<&str> = comps.iter().map(|c| c["kind"].as_str().unwrap()).collect();
-    assert_eq!(kinds, vec!["vega", "text"], "classic: view then narrative");
+    assert_eq!(
+        kinds,
+        vec!["anofox", "text"],
+        "classic: view then narrative"
+    );
 }
