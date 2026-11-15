@@ -148,9 +148,13 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF#refs/tags/v}"; else V="0.0.0-dev"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
+      # Pinned, like escurel's explore.yml: an unpinned `stable` drifted to a
+      # release that deprecates `package:flutter/material.dart`, and
+      # `flutter analyze` fails on that info. Bump deliberately.
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.44.0
       - name: Build bundle
         working-directory: web/peacock-web
         run: |

@@ -28,7 +28,7 @@ DEMO_PID=""
 cleanup() {
   "${RODNEY[@]}" stop >/dev/null 2>&1 || true
   if [[ -n "$DEMO_PID" ]]; then
-    kill "$DEMO_PID" 2>/dev/null || true
+    kill -TERM -- "-$DEMO_PID" 2>/dev/null || true
     wait "$DEMO_PID" 2>/dev/null || true
   fi
 }
@@ -38,9 +38,12 @@ step() { printf '\n== %s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
 step "build + start peacock-demo (real escurel + peacock) on :${PORT}"
+# Through `cargo run`, not the binary: with a downloaded (dynamic) libduckdb
+# (CI's DUCKDB_DOWNLOAD_LIB) cargo puts the library on the loader path.
 (cd "$ROOT" && cargo build -q -p peacock-demo)
-PEACOCK_DEMO_PORT="$PORT" PEACOCK_DEMO_FLUTTER=0 \
-  "${ROOT}/target/debug/peacock-demo" >"${OUT}/demo.log" 2>&1 &
+# In its own process group, so cleanup stops cargo AND the demo it spawned.
+setsid bash -c 'cd "$1" && PEACOCK_DEMO_PORT="$2" PEACOCK_DEMO_FLUTTER=0 exec cargo run -q -p peacock-demo' \
+  _ "$ROOT" "$PORT" >"${OUT}/demo.log" 2>&1 &
 DEMO_PID=$!
 for _ in $(seq 1 240); do
   curl -fsS "${BASE}/healthz" >/dev/null 2>&1 && break
