@@ -324,13 +324,13 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      # Pinned, like escurel's explore.yml: an unpinned `stable` drifted to a
+      # Pinned (main's last green version): an unpinned `stable` drifted to a
       # release that deprecates `package:flutter/material.dart`, and
       # `flutter analyze` fails on that info. Bump deliberately.
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-          flutter-version: 3.44.0
+          flutter-version: 3.47.7
       - name: Build the peacock-web bundle
         working-directory: web/peacock-web
         run: |
