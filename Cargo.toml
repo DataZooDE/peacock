@@ -58,7 +58,7 @@ base64 = "0.22"
 # deterministic pure-Rust SVG. Pinned by CalVer tag (not on crates.io); no
 # features — peacock uses only the pure plan/render/theme/page core, never
 # anofox's own server, auth or SQL execution.
-anofox-visualization = { git = "https://github.com/DataZooDE/anofox-visualization", tag = "v2026.11.12", default-features = false }
+anofox-visualization = { git = "https://github.com/DataZooDE/anofox-visualization", tag = "v2026.11.18", default-features = false }
 
 # Cross-repo path dependencies (see CLAUDE.md "Cross-repo dependencies").
 # `query_instance` merged to escurel `main` (PR #205/#206), so these now
