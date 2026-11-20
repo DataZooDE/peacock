@@ -98,6 +98,9 @@ pub struct Painted {
     pub panels: usize,
     /// Rows of the first drawn panel (the structuredContent summary).
     pub primary_rows: Value,
+    /// Set when escurel's row cap clipped a compiled query (#46): the first
+    /// drawn panel's query if it was clipped, else the first clipped query.
+    pub truncated: Option<peacock_types::Truncation>,
 }
 
 /// Prefetch every compiled query page, then render the script through anofox.
@@ -204,10 +207,29 @@ pub async fn render_dashboard<E: ReportData>(
         .and_then(|i| by_key.values().find(|(j, _)| j == i))
         .map(|(_, rs)| rs.rows.clone())
         .unwrap_or_else(|| Value::Array(Vec::new()));
+    let clipped = |i: usize| {
+        by_key
+            .values()
+            .find(|(j, rs)| *j == i && rs.truncated)
+            .map(|(_, rs)| {
+                let n = rs.rows.as_array().map(Vec::len).unwrap_or(0);
+                peacock_types::Truncation {
+                    rows_shown: n,
+                    rows_total: None,
+                    limit: n,
+                    view: query_ref(&spec.queries[i].query).to_owned(),
+                }
+            })
+    };
+    let truncated = expected
+        .first()
+        .and_then(|i| clipped(*i))
+        .or_else(|| (0..spec.queries.len()).find_map(clipped));
     Ok(Painted {
         svg,
         panels: expected.len(),
         primary_rows,
+        truncated,
     })
 }
 

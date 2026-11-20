@@ -16,7 +16,8 @@ use crate::skill::ReportSkills;
 /// Knobs for one render.
 #[derive(Debug, Clone)]
 pub struct RenderOpts {
-    /// Per-view row cap (NFR-P-3).
+    /// Per-view row cap (NFR-P-3). A view over it is capped and the cut is
+    /// recorded in `structuredContent.truncated` (#46).
     pub max_rows: usize,
     /// Rasterize every chart to PNG (`artifact.pngs`; `artifact.png` is the
     /// first, the chat-card preview — FR-C-2/FR-E-2). `None` skips
@@ -53,7 +54,7 @@ pub struct RenderOpts {
     /// escurel-owned data-**source** reference (`query_ref` + bound params), so
     /// the Mosaic client streams from escurel rather than peacock inlining the
     /// oversized rows. This is below `max_rows` (the hard render cap): a view
-    /// over `max_rows` and without a mosaic threshold still errors (NFR-P-3).
+    /// over `max_rows` and without a mosaic threshold is capped (NFR-P-3, #46).
     pub mosaic_threshold: Option<usize>,
 }
 
@@ -232,6 +233,7 @@ async fn render_dashboard_report<E: ReportData>(
             current_params: crate::dashboard::bound_params(absolute),
             instances: None,
             document: None,
+            truncated: painted.truncated,
         },
         pngs: png.iter().cloned().collect(),
         png,

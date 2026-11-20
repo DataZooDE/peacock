@@ -1,6 +1,6 @@
 ---
 name: peacock-platform
-version: 0.1.0
+version: 0.3.0
 description: Use when building an application that integrates with Peacock, the DataZoo report renderer + MCP-App host — authoring escurel report skills it renders (params/data/instances/views/specs frontmatter), referencing reports from an agent's surface (render_report button + ui://peacock resource), opening instance DOCUMENTS from chat replies (the reserved `document` pseudo-report, skill-page `viewer:`/`actions:`, emit_document_event), theming a deployment (PEACOCK_BRAND_CSS, --pk-* tokens, get_theme), or writing no-mock integration tests (PeacockProcess, NorthwindEscurel). Triggers on phrases like "render a report", "report skill page", "ui://peacock", "render_report", "instance report", "document view", "viewer frontmatter", "actions frontmatter", "emit_document_event", "get_theme", "PEACOCK_BRAND_CSS", "pk tokens", "anofox chart", "roles spec", "dashboard.sql", "peacock author compile", "PeacockProcess". DO NOT use for peacock-internal work (the composer, the chart engine bridge, the guardrails, the iframe runtime) — that is a PR against the peacock repo itself, not consumer-facing.
 ---
 

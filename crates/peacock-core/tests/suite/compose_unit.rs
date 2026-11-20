@@ -1,5 +1,5 @@
 //! Phase 4 pure composer tests (no escurel): A2UI v0.9 structure, inline-data
-//! injection, KPI fold, the guardrail (ACC-4), the oversize bound (NFR-P-3),
+//! injection, KPI fold, the guardrail (ACC-4), the oversize cap (NFR-P-3, #46),
 //! and purity (FR-R-2).
 
 use std::collections::BTreeMap;
@@ -194,15 +194,24 @@ fn guardrail_rejects_contract_plot_escape_hatch() {
 }
 
 #[test]
-fn oversize_result_set_is_a_bounded_render_error() {
-    // NFR-P-3: refuse to render unbounded.
+fn oversize_result_set_is_capped_and_the_truncation_is_surfaced() {
+    // NFR-P-3 still bounds the artifact, but (#46) a view over `max_rows` is
+    // CAPPED and the artifact says so — a render error hid the report, and a
+    // silent cap would show partial data as if it were whole.
     let skill = report(
         json!({ "rev_line": rev_line_spec() }),
-        vec![ViewSpec::Table {
-            data: "rev_by_cat".into(),
-        }],
+        vec![
+            ViewSpec::Chart {
+                data: "rev_by_cat".into(),
+                spec: "rev_line".into(),
+                spec_single: None,
+            },
+            ViewSpec::Table {
+                data: "rev_by_cat".into(),
+            },
+        ],
     );
-    let err = compose(
+    let art = compose(
         &skill,
         &params(),
         &json!({}),
@@ -211,8 +220,68 @@ fn oversize_result_set_is_a_bounded_render_error() {
         2,
         None,
     )
-    .unwrap_err();
-    assert_eq!(err.kind(), "render");
+    .expect("an oversize view is capped, not refused");
+    let t = art
+        .structured_content
+        .truncated
+        .as_ref()
+        .expect("structuredContent.truncated is set");
+    assert_eq!(t.rows_shown, 2);
+    assert_eq!(t.rows_total, Some(3), "peacock's own cap knows the total");
+    assert_eq!(t.limit, 2);
+    assert_eq!(t.view, "rev_by_cat");
+    assert_eq!(art.structured_content.rows.as_array().unwrap().len(), 2);
+    let comps = art.a2ui["components"].as_array().unwrap();
+    let table = comps.iter().find(|c| c["kind"] == "table").unwrap();
+    assert_eq!(table["rows"].as_array().unwrap().len(), 2);
+    let chart = comps.iter().find(|c| c["kind"] == "anofox").unwrap();
+    assert_eq!(chart["spec"]["rows"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn a_rowset_escurel_clipped_is_reported_without_a_total() {
+    // escurel's server cap sets `truncated` but reports no total.
+    let mut rs = nw_rows();
+    rs.truncated = true;
+    let skill = report(
+        json!({ "rev_line": rev_line_spec() }),
+        vec![ViewSpec::Table {
+            data: "rev_by_cat".into(),
+        }],
+    );
+    let art = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &BTreeMap::from([("rev_by_cat".to_string(), rs)]),
+        &BTreeMap::new(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+    let t = art.structured_content.truncated.expect("flagged");
+    assert_eq!((t.rows_shown, t.rows_total, t.limit), (3, None, 3));
+}
+
+#[test]
+fn an_uncapped_render_carries_no_truncation() {
+    let skill = report(
+        json!({ "rev_line": rev_line_spec() }),
+        vec![ViewSpec::Table {
+            data: "rev_by_cat".into(),
+        }],
+    );
+    let art = compose(
+        &skill,
+        &params(),
+        &json!({}),
+        &rows_map(),
+        &BTreeMap::new(),
+        DEFAULT_MAX_ROWS,
+        None,
+    )
+    .unwrap();
+    assert!(art.structured_content.truncated.is_none());
 }
 
 #[test]

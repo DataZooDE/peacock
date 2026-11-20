@@ -36,6 +36,13 @@ pub const NW_QUERY_LEADERBOARD: &str = "nw_revenue_by_salesperson";
 /// [`skill_report_distribution`].
 pub const NW_REPORT_DISTRIBUTION: &str = "northwind-revenue-distribution";
 
+/// Every order-line combination — over escurel's 10 000-row server cap, so a
+/// read is clipped (`truncated: true`) and the artifact must say so (#46).
+/// NOT part of the default seed: pass [`oversized_fixtures`] via
+/// [`NorthwindOpts`].
+pub const NW_REPORT_OVERSIZED: &str = "northwind-line-combinations";
+pub const NW_QUERY_OVERSIZED: &str = "nw_line_combinations";
+
 /// Absolute path to the committed Northwind order-lines Parquet directory.
 fn order_lines_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -409,6 +416,62 @@ specs:
 Who sold the most, best first. Net revenue, EMEA orders only.
 "#
     .to_owned()
+}
+
+/// The `nw_line_combinations` query page: a four-way self join of the 18
+/// order lines (104 976 rows), so escurel's server row cap clips it.
+fn query_oversized() -> String {
+    "---\n\
+     kind: instance\n\
+     skill: query\n\
+     id: nw_line_combinations\n\
+     target: \"[[nw_order_lines::eu]]\"\n\
+     sql: \"SELECT row_number() OVER ()::BIGINT AS n, (a.unit_price * b.quantity)::DOUBLE AS value \
+     FROM {{target}} a, {{target}} b, {{target}} c, {{target}} d\"\n\
+     ---\n\
+     # nw_line_combinations\n\
+     Every combination of four order lines; deliberately larger than the row cap.\n"
+        .to_owned()
+}
+
+/// The `northwind-line-combinations` report: a count KPI, a chart and the
+/// table over [`query_oversized`] — the report a truncation badge shows on.
+fn skill_report_oversized() -> String {
+    r#"---
+kind: skill
+id: northwind-line-combinations
+render: a2ui
+description: Every combination of four Northwind order lines (over the row cap).
+data:
+  lines: "[[query::nw_line_combinations]]"
+views:
+  - { kind: kpi,    data: lines, agg: count, field: value, label: "Rows" }
+  - { kind: anofox, data: lines, spec: by_row }
+  - { kind: table,  data: lines }
+specs:
+  by_row:
+    title: Line value per combination
+    roles:
+      - [n, XAXIS, Combination]
+      - [value, LINECHART, Value]
+---
+Deliberately larger than the row cap.
+"#
+    .to_owned()
+}
+
+/// The oversized report + its query page, as `(extra_skills,
+/// extra_instances)` for [`NorthwindOpts`].
+#[allow(clippy::type_complexity)]
+pub fn oversized_fixtures() -> (Vec<(String, String)>, Vec<(String, String, String)>) {
+    (
+        vec![(NW_REPORT_OVERSIZED.to_owned(), skill_report_oversized())],
+        vec![(
+            "query".to_owned(),
+            NW_QUERY_OVERSIZED.to_owned(),
+            query_oversized(),
+        )],
+    )
 }
 
 /// Consumer knobs for [`NorthwindEscurel::spawn_with`]: extra fixtures

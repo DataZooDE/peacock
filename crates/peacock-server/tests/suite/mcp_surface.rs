@@ -7,11 +7,17 @@ use std::sync::Arc;
 
 use peacock_core::EscurelData;
 use peacock_server::{AppState, serve};
-use peacock_test_support::{NW_REPORT, NorthwindEscurel};
+use peacock_test_support::{
+    NW_REPORT, NW_REPORT_OVERSIZED, NorthwindEscurel, NorthwindOpts, oversized_fixtures,
+};
 use serde_json::{Value, json};
 
 async fn start() -> (NorthwindEscurel, String) {
-    let nw = NorthwindEscurel::spawn().await;
+    start_with(NorthwindOpts::default()).await
+}
+
+async fn start_with(opts: NorthwindOpts) -> (NorthwindEscurel, String) {
+    let nw = NorthwindEscurel::spawn_with(opts).await;
     let state = Arc::new(AppState {
         escurel: EscurelData::new(nw.endpoint()),
         principal: nw.sales_principal(),
@@ -86,6 +92,103 @@ async fn tools_call_links_structured_content_and_ui_resource() {
         res["_meta"]["ui"]["resourceUri"],
         format!("ui://peacock/{NW_REPORT}")
     );
+    nw.shutdown().await;
+}
+
+/// The `_meta` keys an upstream must never set (Triton contract §4b): Triton
+/// drops them, so emitting one is at best dead weight.
+fn assert_no_protected_meta_keys(meta: &Value) {
+    for k in meta.as_object().expect("_meta is an object").keys() {
+        assert!(
+            k != "trace_id"
+                && !k.starts_with("triton/")
+                && !k.contains("modelcontextprotocol")
+                && !k
+                    .split('/')
+                    .next()
+                    .unwrap_or("")
+                    .split('.')
+                    .any(|l| l == "mcp"),
+            "peacock emitted the protected _meta key `{k}`"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tools_call_carries_the_neutral_chart_summary() {
+    // `_meta.chart` v1 (Triton §4b, triton#375): the primary chart described
+    // without a renderer — what Triton maps to a channel's native chart.
+    let (nw, base) = start().await;
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "render_report", "arguments": { "report_id": NW_REPORT } }),
+    )
+    .await;
+    let meta = &r["result"]["_meta"];
+    let chart = &meta["chart"];
+    assert_eq!(chart["kind"], "bar", "{meta}");
+    assert_eq!(chart["title"], "Revenue by category");
+    assert_eq!(chart["x"], "month");
+    assert_eq!(chart["y"], "Revenue");
+    assert_eq!(chart["series"], "category");
+    assert_eq!(chart["stacked"], true);
+    assert_eq!(chart["orientation"], "vertical");
+    let rows = chart["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 16);
+    assert!(rows.iter().all(|r| r["Revenue"].is_f64()));
+    // The deprecated Vega-Lite still rides for one more release.
+    assert_eq!(meta["vega_specs"][0]["mark"]["type"], "bar");
+    assert_no_protected_meta_keys(meta);
+    nw.shutdown().await;
+}
+
+#[tokio::test]
+async fn tools_call_surfaces_row_truncation() {
+    // #46: escurel's row cap clipped the view — structuredContent says so,
+    // the model-facing text says so, and the chart summary stays in bounds.
+    let (extra_skills, extra_instances) = oversized_fixtures();
+    let (nw, base) = start_with(NorthwindOpts {
+        extra_skills,
+        extra_instances,
+        ..Default::default()
+    })
+    .await;
+    let r = rpc(
+        &base,
+        "tools/call",
+        json!({ "name": "render_report", "arguments": { "report_id": NW_REPORT_OVERSIZED } }),
+    )
+    .await;
+    let res = &r["result"];
+    assert_eq!(res["isError"], false, "{}", res["content"]);
+    assert_eq!(
+        res["structuredContent"]["truncated"],
+        json!({ "rows_shown": 10_000, "limit": 10_000, "view": "lines" })
+    );
+    let text = res["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("truncated"), "the model is told: {text}");
+    let chart = &res["_meta"]["chart"];
+    assert_eq!(chart["kind"], "line");
+    assert_eq!(chart["rows"].as_array().unwrap().len(), 200);
+    assert_no_protected_meta_keys(&res["_meta"]);
+    // The served runtime draws the badge from it (the browser check is
+    // scripts/verify-ui.sh, J8).
+    let read = rpc(
+        &base,
+        "resources/read",
+        json!({ "uri": format!("ui://peacock/{NW_REPORT_OVERSIZED}") }),
+    )
+    .await;
+    let html = read["result"]["contents"][0]["text"].as_str().unwrap();
+    for hook in [
+        "sc.truncated",
+        "class=\"trunc\"",
+        "data-truncated",
+        "Partial data.",
+    ] {
+        assert!(html.contains(hook), "runtime hook `{hook}` missing");
+    }
     nw.shutdown().await;
 }
 

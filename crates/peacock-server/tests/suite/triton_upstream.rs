@@ -3,7 +3,8 @@
 //! `TritonProcess` (the real triton binary) + `peacock-server` + escurel.
 //!
 //! Exercises Triton's MCP-Apps proxying (issue #143): `tools/call render_report`
-//! is dispatched to peacock and its `_meta.ui.resourceUri` is surfaced; a
+//! is dispatched to peacock and its `_meta` (the `ui.resourceUri`, the PNG, the
+//! SVGs and the `chart` summary, triton#375) is surfaced; a
 //! `resources/read ui://peacock/<report>` is proxied to peacock and returns the
 //! iframe runtime.
 //!
@@ -101,10 +102,36 @@ async fn triton_proxies_render_report_and_the_ui_resource() {
         format!("ui://peacock/{NW_REPORT}"),
         "Triton surfaced peacock's ui:// link: {res}"
     );
-    // J2 (#44): Triton's MCP surface rebuilds `_meta` (trace + ui only); the
-    // chat inputs — the anofox PNG, the painted SVG and the DERIVED Vega-Lite
-    // native-chart consumers (GE / Teams) read — ride Triton's tool-dispatch
-    // result, which its chat and A2A adapters consume (REST shows it whole).
+    // triton#375: Triton's MCP surface passes peacock's own top-level `_meta`
+    // keys through (beside its own `trace_id` and `ui`), so an MCP client
+    // behind Triton gets what it gets from peacock directly: the anofox PNG,
+    // the painted SVG and the neutral chart summary.
+    let meta = &res["_meta"];
+    assert!(
+        meta["trace_id"].is_string(),
+        "Triton's own trace id: {meta}"
+    );
+    let png = meta["png_base64"].as_str().expect("png through Triton MCP");
+    assert!(png.starts_with("iVBORw0KGgo"), "a base64 PNG");
+    assert!(
+        meta["svgs"][0]
+            .as_str()
+            .expect("svgs through Triton MCP")
+            .contains("Revenue by category")
+    );
+    let chart = &meta["chart"];
+    assert_eq!(
+        chart["kind"], "bar",
+        "chart summary through Triton: {chart}"
+    );
+    assert_eq!(chart["x"], "month");
+    assert_eq!(chart["y"], "Revenue");
+    assert_eq!(chart["series"], "category");
+    assert_eq!(chart["stacked"], true);
+    assert_eq!(chart["rows"].as_array().unwrap().len(), 16);
+
+    // The deprecated derived Vega-Lite still rides the tool-dispatch result
+    // (REST shows it whole) for one more release.
     let rest: Value = http
         .post(triton.rest_url("/v1/tools/render_report"))
         .bearer_auth("dev-token")
@@ -115,19 +142,13 @@ async fn triton_proxies_render_report_and_the_ui_resource() {
         .json()
         .await
         .unwrap();
-    let meta = &rest["result"]["_meta"];
-    let png = meta["png_base64"].as_str().expect("png through Triton");
-    assert!(png.starts_with("iVBORw0KGgo"), "a base64 PNG");
-    assert!(
-        meta["svgs"][0]
-            .as_str()
-            .unwrap()
-            .contains("Revenue by category")
+    let rmeta = &rest["result"]["_meta"];
+    assert_eq!(
+        rmeta["chart"], *chart,
+        "REST and MCP carry the same summary"
     );
-    let vega = &meta["vega_specs"][0];
+    let vega = &rmeta["vega_specs"][0];
     assert_eq!(vega["mark"]["type"], "bar", "derived Vega-Lite: {vega}");
-    assert_eq!(vega["encoding"]["x"]["field"], "month");
-    assert_eq!(vega["encoding"]["color"]["field"], "category");
     assert_eq!(vega["data"]["values"].as_array().unwrap().len(), 16);
 
     // 2. resources/read ui://peacock/<report> → Triton proxies to peacock,
@@ -328,7 +349,7 @@ fn teams_claims(fake: &triton_tests::chat_courier_fixture::FakeBotFramework) -> 
 
 /// Alice types into Teams; her agent answers with the Northwind report.
 /// Triton dispatches `render_report` to the REAL peacock (real escurel, real
-/// Parquet), maps the derived Vega-Lite to a native `Chart.*` element, and
+/// Parquet), maps peacock's chart summary (`_meta.chart`) to a native `Chart.*` element, and
 /// serves peacock's anofox PNG as the chart's fallback image. Microsoft's
 /// side is triton-tests' `FakeBotFramework` (a real HTTP server for the
 /// third-party Bot Connector); the agent is a `FakeAgent` — neither is the
@@ -422,6 +443,9 @@ async fn teams_message_gets_native_chart_from_anofox_report() {
         .unwrap_or_else(|| panic!("expected a native Chart.* element; got: {card}"));
     assert_eq!(chart["type"], "Chart.VerticalBar.Grouped", "{chart}");
     assert_eq!(chart["title"], "Revenue by category");
+    // `stacked` exists only in the neutral summary (`_meta.chart`), so this
+    // proves Triton built the native chart from it, not from `vega_specs`.
+    assert_eq!(chart["stacked"], true, "{chart}");
     let legends: Vec<&str> = chart["data"]
         .as_array()
         .unwrap()

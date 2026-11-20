@@ -3,12 +3,13 @@
 //! table / text), the `kind: anofox` components carrying anofox panel specs
 //! with the escurel rows injected **inline** (FR-V-3), the derived Vega-Lite
 //! compatibility specs, and the `structuredContent` (rows + param schema +
-//! current resolved params, FR-X-1). Guardrails (FR-V-4) and an oversize
-//! bound (NFR-P-3) run here. Painting (SVG/PNG) is the render step's job.
+//! current resolved params, FR-X-1). Guardrails (FR-V-4) and the row cap
+//! (NFR-P-3, surfaced as `structuredContent.truncated`, #46) run here.
+//! Painting (SVG/PNG) is the render step's job.
 
 use std::collections::BTreeMap;
 
-use peacock_types::{Artifact, Error, ParamValue, Result, StructuredContent};
+use peacock_types::{Artifact, Error, ParamValue, Result, StructuredContent, Truncation};
 use serde_json::{Value, json};
 
 use crate::data::RowSet;
@@ -17,8 +18,10 @@ use crate::instance::InstancePage;
 use crate::skill::{Agg, ReportSkill, ViewSpec};
 
 /// Default cap on rows a single view may carry into a rendered artifact
-/// (NFR-P-3). Beyond this peacock returns a bounded `Render` error rather than
-/// rendering unboundedly.
+/// (NFR-P-3). Beyond this peacock keeps the first `max_rows` rows and records
+/// the cut in `structuredContent.truncated` (#46). Equal to escurel's server
+/// row cap and to anofox's `RenderLimits.max_rows`, so anofox never sees more
+/// rows than it will draw.
 pub const DEFAULT_MAX_ROWS: usize = 10_000;
 
 /// Compose the artifact. `rows` is keyed by the report's data aliases.
@@ -35,18 +38,62 @@ pub fn compose(
     max_rows: usize,
     mosaic_threshold: Option<usize>,
 ) -> Result<Artifact> {
-    // Oversize guard before building anything (NFR-P-3). Mosaic mode (which
-    // streams from escurel rather than inlining) lifts this for chart views;
-    // a non-chart view (table/kpi) over `max_rows` still refuses to render.
+    // Row caps before building anything (NFR-P-3, #46). A view over
+    // `max_rows` is CAPPED to `max_rows`, and escurel's own server cap shows
+    // up as `RowSet::truncated`; either way the artifact records it in
+    // `structuredContent.truncated`, so partial data never reads as whole.
+    // Mosaic mode (which streams from escurel rather than inlining) lifts the
+    // cap for the chart views it covers.
+    let mut truncations: BTreeMap<&str, Truncation> = BTreeMap::new();
+    let mut capped: BTreeMap<String, RowSet> = BTreeMap::new();
     for (alias, rs) in rows {
         let n = rs.rows.as_array().map(Vec::len).unwrap_or(0);
         let mosaic_covers = mosaic_threshold.is_some_and(|t| n > t);
         if n > max_rows && !mosaic_covers {
-            return Err(Error::render(format!(
-                "view `{alias}` returned {n} rows (> {max_rows}); refusing to render unbounded"
-            )));
+            let mut c = rs.clone();
+            if let Some(a) = c.rows.as_array_mut() {
+                a.truncate(max_rows);
+            }
+            capped.insert(alias.clone(), c);
+            truncations.insert(
+                alias,
+                Truncation {
+                    rows_shown: max_rows,
+                    // escurel clipped first: the real total is unknown.
+                    rows_total: (!rs.truncated).then_some(n),
+                    limit: max_rows,
+                    view: alias.clone(),
+                },
+            );
+        } else if rs.truncated {
+            // escurel returns exactly its cap when it clips.
+            truncations.insert(
+                alias,
+                Truncation {
+                    rows_shown: n,
+                    rows_total: None,
+                    limit: n,
+                    view: alias.clone(),
+                },
+            );
         }
     }
+    // The primary view's truncation wins, else the first in data order.
+    let truncated = skill
+        .data
+        .keys()
+        .find_map(|alias| truncations.get(alias.as_str()).cloned())
+        .or_else(|| truncations.values().next().cloned());
+    let owned: BTreeMap<String, RowSet>;
+    let rows = if capped.is_empty() {
+        rows
+    } else {
+        owned = rows
+            .iter()
+            .map(|(k, v)| (k.clone(), capped.remove(k).unwrap_or_else(|| v.clone())))
+            .collect();
+        &owned
+    };
     // Track whether any view rendered in Mosaic mode: the structuredContent
     // summary must then omit the big inline rows (the row count stands in).
     let mut any_mosaic = false;
@@ -132,6 +179,7 @@ pub fn compose(
         current_params: params_to_json(params),
         instances: instances_content(skill, pages),
         document: None,
+        truncated,
     };
 
     Ok(Artifact {

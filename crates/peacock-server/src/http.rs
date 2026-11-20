@@ -232,6 +232,9 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 "report_id": req.report_id,
                 "a2ui": art.a2ui,
                 "structuredContent": art.structured_content,
+                // The neutral chart summary (`_meta.chart` on MCP, triton#375).
+                "chart": peacock_core::chart::primary_chart_summary(&art),
+                // Deprecated (triton#375): one more release.
                 "vega_specs": art.vega_specs,
                 "anofox_specs": art.anofox_specs,
                 "svgs": art.chart_svgs(),

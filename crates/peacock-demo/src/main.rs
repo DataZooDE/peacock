@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use peacock_core::EscurelData;
 use peacock_server::{AppState, serve};
-use peacock_test_support::NorthwindEscurel;
+use peacock_test_support::{NorthwindEscurel, NorthwindOpts, oversized_fixtures};
 use triton_tests::TritonProcess;
 
 const DEMO_HTML: &str = include_str!("../assets/demo.html");
@@ -53,7 +53,15 @@ async fn main() {
         .init();
 
     eprintln!("peacock-demo: starting a real escurel seeded with Northwind…");
-    let nw = NorthwindEscurel::spawn().await;
+    // Plus one report over escurel's row cap, so the truncation badge (#46)
+    // has a real report to show on (`scripts/verify-ui.sh` drives it).
+    let (extra_skills, extra_instances) = oversized_fixtures();
+    let nw = NorthwindEscurel::spawn_with(NorthwindOpts {
+        extra_skills,
+        extra_instances,
+        ..Default::default()
+    })
+    .await;
     eprintln!("peacock-demo: escurel up at {}", nw.endpoint());
 
     let port: u16 = std::env::var("PEACOCK_DEMO_PORT")

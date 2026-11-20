@@ -13,6 +13,9 @@
 #   RODNEY=rodney scripts/verify-ui.sh   # use an installed rodney instead of uvx
 #   PEACOCK_UI_PORT=8791            # the demo's port
 #
+# J8 (issue #46): a report over escurel's row cap shows a visible
+# "partial data" badge, in a light and in a dark host theme.
+#
 # Exit 0 = every assertion held. Screenshots: target/verify-ui/*.png.
 set -euo pipefail
 
@@ -92,5 +95,31 @@ step "back to all categories"
 "${RODNEY[@]}" assert \
   '[...document.querySelectorAll(".chart .gg-mark")].some(m => m.dataset.series === "Seafood")' \
   -m "the un-drilled chart shows every category again"
+
+step "a report over the row cap shows the partial-data badge (#46)"
+"${RODNEY[@]}" open "${BASE}/ui/northwind-line-combinations"
+"${RODNEY[@]}" wait '.trunc[data-truncated="lines"]'
+"${RODNEY[@]}" assert \
+  'document.querySelector(".trunc").textContent.includes("Showing the first 10,000 rows; more exist")' \
+  -m "the badge says how many rows the report shows"
+"${RODNEY[@]}" assert \
+  'document.querySelector(".trunc").getAttribute("role") === "status"' \
+  -m "the badge is announced to assistive tech"
+"${RODNEY[@]}" assert \
+  'document.querySelector(".trunc").getBoundingClientRect().height > 20' \
+  -m "the badge is visible (laid out, not hidden)"
+"${RODNEY[@]}" assert \
+  '(document.querySelector(".trunc").compareDocumentPosition(document.querySelector(".chart")) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0' \
+  -m "the badge sits above the chart"
+"${RODNEY[@]}" screenshot -w 1100 -h 700 "${OUT}/4-truncated-light.png"
+# A dark host theme arrives as --pk-* tokens; the badge follows them.
+"${RODNEY[@]}" js '(() => { const r = document.documentElement.style;
+  r.setProperty("--pk-bg", "#1b1a19"); r.setProperty("--pk-text", "#f3f2f1");
+  r.setProperty("--pk-muted", "#c8c6c4"); r.setProperty("--pk-border", "#484644");
+  r.setProperty("--pk-surface", "#252423"); return "dark"; })()'
+"${RODNEY[@]}" assert \
+  'getComputedStyle(document.querySelector(".trunc")).color === "rgb(243, 242, 241)"' \
+  -m "the badge text follows the dark theme"
+"${RODNEY[@]}" screenshot -w 1100 -h 700 "${OUT}/5-truncated-dark.png"
 
 printf '\nverify-ui: OK — screenshots in %s\n' "$OUT"
