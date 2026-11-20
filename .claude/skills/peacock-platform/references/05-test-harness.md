@@ -28,6 +28,9 @@ peacock-test-support = { path = "…/peacock/crates/peacock-test-support" }
   `mint_token_with_groups(…)`, `sales_client()` (an escurel-client for
   direct verification — inbox contents, page state).
 - `NW_REPORT` — the seeded demo report id.
+- `oversized_fixtures()` → `(extra_skills, extra_instances)` for
+  `NorthwindOpts`: `NW_REPORT_OVERSIZED`, a report over escurel's
+  10 000-row server cap (a four-way self join), for row-truncation tests.
 
 ## Patterns worth copying (from peacock's own suites)
 

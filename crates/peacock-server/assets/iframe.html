@@ -50,6 +50,19 @@
          background:var(--txt); color:var(--pk-bg,#fff); padding:4px 8px;
          border-radius:6px; white-space:nowrap; }
   .tip[hidden] { display:none; }
+  /* Row truncation (#46): a row cap clipped a view, so the report shows
+     partial data. Amber tinted against the themed background and text, so it
+     reads on a light and on a dark host theme alike. */
+  .trunc { --warn: var(--pk-warning, #b45309);
+           display:flex; align-items:center; gap:8px; margin:0 0 12px;
+           padding:8px 12px; border-radius:var(--rad); font-size:12.5px;
+           color:var(--txt);
+           background:color-mix(in srgb, var(--warn) 14%, var(--pk-bg, #fff));
+           border:1px solid color-mix(in srgb, var(--warn) 60%, var(--bdr)); }
+  .trunc .ic { flex:none; width:18px; height:18px; border-radius:50%;
+               background:var(--warn); color:#fff; font-weight:700;
+               font-size:12px; line-height:18px; text-align:center; }
+  .trunc b { font-weight:600; }
   /* Instance-report components (facts / markdown / timeline) — Material cards. */
   .facts { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:14px; }
   .fact { background:var(--sfc); border:1px solid var(--bdr); border-radius:var(--rad);
@@ -272,6 +285,16 @@ function render(data) {
     ? svgs.map((s, i) => `<figure class="chart" data-chart="${i}">${s}</figure>`).join("")
     : (png ? `<img alt="chart" src="data:image/png;base64,${png}">` : "");
 
+  // A row cap clipped a view (#46): say so on the chart, above the numbers.
+  const t = sc.truncated;
+  const fmt = n => Number(n).toLocaleString("en-US");
+  const badge = t ? `<div class="trunc" role="status" data-truncated="${esc(t.view)}">
+      <span class="ic" aria-hidden="true">!</span>
+      <span><b>Partial data.</b> ${t.rows_total != null
+        ? `Showing the first ${fmt(t.rows_shown)} of ${fmt(t.rows_total)} rows`
+        : `Showing the first ${fmt(t.rows_shown)} rows; more exist`} (row limit ${fmt(t.limit)}).
+        Totals and charts cover only these rows.</span></div>` : "";
+
   const parts = [];
 
   // Instance report: the record(s) the report composed (facts/markdown/timeline).
@@ -307,15 +330,15 @@ function render(data) {
         <div class="sub">${esc(scope || "live from escurel")}</div></div></div>
       <div class="kpis">
         <div class="kpi"><div class="l">Total ${esc(numeric || "value")}</div><div class="v">${money(total)}</div></div>
-        <div class="kpi"><div class="l">Rows</div><div class="v" style="color:#201f1e">${rows.length}</div></div>
+        <div class="kpi"><div class="l">Rows</div><div class="v" style="color:var(--txt)">${rows.length}</div></div>
       </div>
-      ${charts}
+      ${badge}${charts}
       ${canDrill ? `<div class="chips">${cats.map(c=>`<span class="chip ${(params.category||'ALL')===c?'on':''}" data-cat="${esc(c)}">${esc(c==='ALL'?'All':c)}</span>`).join("")}</div>` : ""}
       <table><tr>${cols.map(c=>`<th>${esc(c)}</th>`).join("")}</tr>
         ${rows.map(r=>`<tr>${cols.map(c=>`<td>${esc(typeof r[c]==="number"?(+r[c]).toLocaleString("en-US"):r[c])}</td>`).join("")}</tr>`).join("")}</table>`);
   } else if (charts) {
     // A compiled dashboard (no row summary of its own) or a chart-only report.
-    parts.push(`<div class="head"><div class="t">${titleize(REPORT_ID)}</div></div>${charts}`);
+    parts.push(`<div class="head"><div class="t">${titleize(REPORT_ID)}</div></div>${badge}${charts}`);
   } else if (!parts.length) {
     parts.push(`<div class="muted">Nothing to show.</div>`);
   }

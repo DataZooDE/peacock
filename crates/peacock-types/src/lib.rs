@@ -11,7 +11,7 @@ mod params;
 mod principal;
 mod selection;
 
-pub use artifact::{Artifact, StructuredContent};
+pub use artifact::{Artifact, StructuredContent, Truncation};
 pub use error::{Error, Result};
 pub use params::{ParamSchema, ParamSpec, ParamType, ParamValue};
 pub use principal::Principal;

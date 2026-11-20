@@ -6,6 +6,7 @@
 
 use peacock_types::{
     Artifact, Error, ParamSchema, ParamSpec, ParamType, ParamValue, Principal, StructuredContent,
+    Truncation,
 };
 use serde_json::{Value, json};
 
@@ -132,6 +133,7 @@ fn artifact_carries_a2ui_charts_structured_and_optional_png() {
         current_params: json!({ "category": "Beverages", "from": "1997-01-01" }),
         instances: None,
         document: None,
+        truncated: None,
     };
     let panel = json!({ "rows": [{ "c0": "1997-01", "c1": 100 }], "roles": [[0, "XAXIS", "month"], [1, "LINECHART", "revenue"]] });
     let art = Artifact {
@@ -158,4 +160,49 @@ fn artifact_carries_a2ui_charts_structured_and_optional_png() {
         "Beverages"
     );
     assert!(art.png.is_none());
+}
+
+// ── row truncation (#46): the artifact says when rows were capped ──
+
+#[test]
+fn structured_content_reports_truncation_only_when_rows_were_capped() {
+    let mut sc = StructuredContent {
+        rows: json!([]),
+        param_schema: json!({}),
+        current_params: json!({}),
+        instances: None,
+        document: None,
+        truncated: None,
+    };
+    // Untruncated: no key at all (existing artifacts stay byte-identical).
+    assert!(
+        serde_json::to_value(&sc)
+            .unwrap()
+            .get("truncated")
+            .is_none()
+    );
+
+    // peacock's own cap knows the total.
+    sc.truncated = Some(Truncation {
+        rows_shown: 10_000,
+        rows_total: Some(12_345),
+        limit: 10_000,
+        view: "lines".into(),
+    });
+    assert_eq!(
+        serde_json::to_value(&sc).unwrap()["truncated"],
+        json!({ "rows_shown": 10_000, "rows_total": 12_345, "limit": 10_000, "view": "lines" })
+    );
+
+    // escurel's server cap does not report a total: the key is omitted.
+    sc.truncated = Some(Truncation {
+        rows_shown: 10_000,
+        rows_total: None,
+        limit: 10_000,
+        view: "lines".into(),
+    });
+    let v = serde_json::to_value(&sc).unwrap();
+    assert!(v["truncated"].get("rows_total").is_none());
+    let back: StructuredContent = serde_json::from_value(v).unwrap();
+    assert_eq!(back, sc);
 }

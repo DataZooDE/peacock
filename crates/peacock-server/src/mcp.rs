@@ -229,22 +229,31 @@ pub fn tool_result(report_id: &str, caller_params: &Value, art: &Artifact) -> Va
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(p)
     });
+    let mut meta = json!({
+        "ui": ui_meta(report_id, caller_params, widget_csp_origin().as_deref()),
+        "png_base64": png_b64,
+        // DEPRECATED (triton#375) — the minimal Vega-Lite derived from the
+        // chartable panels, read by Triton only when `chart` is absent or
+        // invalid. Emitted for one more release, then removed.
+        "vega_specs": art.vega_specs,
+        // The painted anofox SVG of every chart, in layout order — what
+        // the ui:// iframe shows.
+        "svgs": art.chart_svgs(),
+    });
+    // The renderer-neutral summary of the primary chart (`_meta.chart` v1,
+    // Triton contract §4b, triton#375): Triton maps it to a channel's NATIVE
+    // chart (Teams `Chart.*`, Gemini Enterprise's `VegaChart`). Omitted —
+    // not null, which Triton would reject with a warning — when no chart
+    // fits the contract; Triton then shows the PNG. Peacock never sets
+    // `trace_id` or a `triton/*` key: those are Triton's, and it drops them.
+    if let Some(chart) = peacock_core::chart::primary_chart_summary(art) {
+        meta["chart"] = chart;
+    }
     json!({
         "content": [{ "type": "text", "text": summary(report_id, art) }],
         "structuredContent": art.structured_content,
         "isError": false,
-        "_meta": {
-            "ui": ui_meta(report_id, caller_params, widget_csp_origin().as_deref()),
-            "png_base64": png_b64,
-            // Minimal Vega-Lite DERIVED from the chartable anofox panels
-            // (rows inline), so a caller that renders a NATIVE chart — Gemini
-            // Enterprise's A2UI `VegaChart`, Teams `Chart.*` — uses it instead
-            // of the PNG. Empty when no chart has a minimal Vega-Lite form.
-            "vega_specs": art.vega_specs,
-            // The painted anofox SVG of every chart, in layout order — what
-            // the ui:// iframe shows.
-            "svgs": art.chart_svgs(),
-        }
+        "_meta": meta,
     })
 }
 
@@ -385,7 +394,25 @@ fn summary(report_id: &str, art: &Artifact) -> String {
         .as_array()
         .map(Vec::len)
         .unwrap_or(0);
-    format!("Rendered `{report_id}` — {rows} rows. View state in structuredContent.current_params.")
+    // A capped view is partial data: tell the model, which reads only this
+    // text and structuredContent, so it does not draw conclusions from a part
+    // as if it were the whole (#46).
+    let cut = match &art.structured_content.truncated {
+        Some(t) => match t.rows_total {
+            Some(total) => format!(
+                " Rows truncated: view `{}` shows the first {} of {total} rows (limit {}).",
+                t.view, t.rows_shown, t.limit
+            ),
+            None => format!(
+                " Rows truncated: view `{}` shows the first {} rows; more exist (limit {}).",
+                t.view, t.rows_shown, t.limit
+            ),
+        },
+        None => String::new(),
+    };
+    format!(
+        "Rendered `{report_id}` — {rows} rows.{cut} View state in structuredContent.current_params."
+    )
 }
 
 /// `resources/read ui://peacock/<report>` → the iframe runtime HTML (FR-M-1).

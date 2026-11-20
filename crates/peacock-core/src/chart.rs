@@ -431,8 +431,12 @@ fn rasterize(svg: &str, scale: f32, background: Option<&str>) -> Result<Vec<u8>>
         .map_err(|e| Error::render(format!("png encode: {e}")))
 }
 
-// ── derived Vega-Lite (compatibility output) ────────────────────────────────
+// ── derived Vega-Lite (compatibility output, deprecated) ────────────────────
 
+/// **Deprecated** (triton#375): Triton now reads the neutral
+/// [`chart_summary`] (`_meta.chart`) first; `vega_specs` ships for one more
+/// release, then goes. Mosaic mode keeps using this derivation internally.
+///
 /// A minimal Vega-Lite spec derived from a panel, for consumers that read
 /// Vega-Lite natively: Triton's Teams `Chart.VerticalBar` mapping, Gemini
 /// Enterprise's `VegaChart`, and Mosaic mode. Only bar / line / area /
@@ -549,6 +553,220 @@ pub fn derive_vega_lite(panel: &Value) -> Option<Value> {
         }
     }
     Some(spec)
+}
+
+// ── neutral chart summary (`_meta.chart` v1, triton#375) ─────────────────────
+
+/// Rows a chart summary carries at most (Triton upstream contract §4b).
+pub const CHART_SUMMARY_MAX_ROWS: usize = 200;
+
+/// Modifier roles that change only how a chart looks, not what its data says;
+/// a summary ignores them. Any other modifier (a second axis, facets, …)
+/// means the native chart would misstate the panel, so there is no summary.
+const COSMETIC_MODIFIERS: &[&str] = &[
+    "XFORMAT",
+    "XSCALE",
+    "YSCALE",
+    "XBREAKS",
+    "YBREAKS",
+    "ALPHA",
+    "TOOLTIP",
+    "TOOLTIP_FORMAT",
+    "TOOLTIP_HEADER",
+    "TOOLTIP_MODE",
+    "HOVER_FOCUS",
+    "POINTS",
+    "LINESTYLE",
+    "LEGEND",
+    "ANIMATE",
+    "TRANSITION",
+    "SYNC_ZOOM",
+    "SYNC_FRAME",
+];
+
+/// `YFORMAT` values that are a number format, not a unit.
+const PURE_FORMATS: &[&str] = &["comma", "compact", "si", "plain", "integer", "number"];
+
+/// The primary chart's summary: the first chart panel in layout order.
+/// `None` when the report has no chart the contract can express.
+pub fn primary_chart_summary(art: &peacock_types::Artifact) -> Option<Value> {
+    art.anofox_specs.first().and_then(chart_summary)
+}
+
+/// The renderer-neutral chart summary Triton maps to a channel's native chart
+/// (`_meta.chart` v1, Triton upstream contract §4b). Derived from an anofox
+/// panel spec (as [`panel_spec`] builds it):
+///
+/// - `kind` from the value role: `BARCHART[_STACKED]` → `bar`, `LINECHART` →
+///   `line`, `AREACHART[_STACKED]` → `area`, `SCATTER` → `scatter`, `PIE` →
+///   `pie`, `DONUTCHART` → `donut`;
+/// - `x` / `y` / `series` are the `XAXIS` / value / `CATEGORY` roles' display
+///   names (pie and donut: `x` is the `CATEGORY`, and there is no series);
+/// - `title` from `TITLE`; `x_title` / `y_title` from `XTITLE` / `YTITLE`;
+///   `unit` from `YFORMAT` (`percent` → `%`; a pure number format has none),
+///   else `CURRENCY_CODE`;
+/// - bars: `orientation` (`horizontal` under `FLIP`), and with a series
+///   `stacked` (`BARCHART_STACKED`).
+///
+/// Rows hold only the `x`, `y` and `series` fields. A point whose `y` is not
+/// a finite number (a numeric string counts), whose `x` or series is missing,
+/// or — for a scatter — whose `x` is not numeric is dropped; then the first
+/// [`CHART_SUMMARY_MAX_ROWS`] points are kept.
+///
+/// `None` when the panel is richer than the contract can say (a second
+/// measure, a heatmap axis, a histogram, facets, …), when two fields would
+/// share a name, or when no valid point is left. Triton then falls back to
+/// the PNG.
+pub fn chart_summary(panel: &Value) -> Option<Value> {
+    let roles = panel.get("roles")?.as_array()?;
+    let mut x: Option<(usize, String)> = None;
+    let mut cat: Option<(usize, String)> = None;
+    let mut val: Option<(usize, String, &'static str)> = None;
+    let mut title: Option<usize> = None;
+    let mut flip = false;
+    let (mut y_format, mut currency, mut x_title, mut y_title) = (None, None, None, None);
+    for r in roles {
+        let i = r.get(0)?.as_u64()? as usize;
+        let name = r
+            .get(2)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        let spec = anofox_visualization::roles::lookup(r.get(1)?.as_str()?)?;
+        match spec.token {
+            "XAXIS" if x.is_none() => x = Some((i, name)),
+            "CATEGORY" if cat.is_none() => cat = Some((i, name)),
+            "TITLE" => title = Some(i),
+            // A bubble's size has no place in the summary; the points stand.
+            "SIZE" => {}
+            "BARCHART" | "BARCHART_STACKED" | "LINECHART" | "AREACHART" | "AREACHART_STACKED"
+            | "SCATTER" | "PIE" | "DONUTCHART"
+                if val.is_none() =>
+            {
+                val = Some((i, name, spec.token));
+            }
+            "FLIP" => flip = true,
+            "YFORMAT" => y_format = Some(i),
+            "CURRENCY_CODE" => currency = Some(i),
+            "XTITLE" => x_title = Some(i),
+            "YTITLE" => y_title = Some(i),
+            t if spec.category == "annotation" || COSMETIC_MODIFIERS.contains(&t) => {}
+            _ => return None,
+        }
+    }
+    let (vi, y_name, value_kind) = val?;
+    let (kind, radial) = match value_kind {
+        "BARCHART" | "BARCHART_STACKED" => ("bar", false),
+        "LINECHART" => ("line", false),
+        "AREACHART" | "AREACHART_STACKED" => ("area", false),
+        "SCATTER" => ("scatter", false),
+        "PIE" => ("pie", true),
+        _ => ("donut", true),
+    };
+    // Pie / donut: the slices are the categories; no series.
+    let (x, series) = if radial {
+        match (cat, x) {
+            (Some(c), None) | (None, Some(c)) => (c, None),
+            _ => return None,
+        }
+    } else {
+        (x?, cat)
+    };
+    let names: Vec<&str> = [Some(&x.1), Some(&y_name), series.as_ref().map(|s| &s.1)]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .collect();
+    if names.iter().any(|n| n.is_empty())
+        || (1..names.len()).any(|k| names[..k].contains(&names[k]))
+    {
+        return None;
+    }
+
+    let rows = panel.get("rows")?.as_array()?;
+    let key = |i: usize| format!("c{i}");
+    let scatter = kind == "scatter";
+    let points: Vec<Value> = rows
+        .iter()
+        .filter_map(|row| {
+            let xv = row.get(key(x.0))?;
+            let xv = if scatter {
+                json!(finite_number(xv)?)
+            } else {
+                scalar(xv)?.clone()
+            };
+            let yv = finite_number(row.get(key(vi))?)?;
+            let mut out = Map::new();
+            out.insert(x.1.clone(), xv);
+            out.insert(y_name.clone(), json!(yv));
+            if let Some((si, sname)) = &series {
+                out.insert(sname.clone(), scalar(row.get(key(*si))?)?.clone());
+            }
+            Some(Value::Object(out))
+        })
+        .take(CHART_SUMMARY_MAX_ROWS)
+        .collect();
+    if points.is_empty() {
+        return None;
+    }
+
+    // A modifier's value: the column's first non-blank string (anofox's rule).
+    let text = |slot: Option<usize>| {
+        let i = slot?;
+        rows.iter().find_map(|r| match r.get(key(i)) {
+            Some(Value::String(s)) if !s.trim().is_empty() => Some(s.trim().to_owned()),
+            _ => None,
+        })
+    };
+    let unit = match text(y_format) {
+        Some(f) if f == "percent" => Some("%".to_owned()),
+        Some(f) if PURE_FORMATS.contains(&f.as_str()) => None,
+        Some(f) => Some(f),
+        None => text(currency),
+    };
+
+    let mut out = Map::new();
+    out.insert("kind".into(), json!(kind));
+    out.insert("x".into(), json!(x.1));
+    out.insert("y".into(), json!(y_name));
+    if let Some((_, s)) = &series {
+        out.insert("series".into(), json!(s));
+    }
+    for (k, v) in [
+        ("title", text(title)),
+        ("x_title", text(x_title)),
+        ("y_title", text(y_title)),
+        ("unit", unit),
+    ] {
+        if let Some(v) = v {
+            out.insert(k.into(), json!(v));
+        }
+    }
+    if kind == "bar" {
+        let orientation = if flip { "horizontal" } else { "vertical" };
+        out.insert("orientation".into(), json!(orientation));
+        if series.is_some() {
+            out.insert("stacked".into(), json!(value_kind == "BARCHART_STACKED"));
+        }
+    }
+    out.insert("rows".into(), Value::Array(points));
+    Some(Value::Object(out))
+}
+
+/// A string, number or boolean — what the contract accepts as an x or series.
+fn scalar(v: &Value) -> Option<&Value> {
+    matches!(v, Value::String(_) | Value::Number(_) | Value::Bool(_)).then_some(v)
+}
+
+/// A finite number, from a JSON number or a numeric string (DECIMALs can
+/// arrive as strings).
+fn finite_number(v: &Value) -> Option<f64> {
+    match v {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+    .filter(|f| f.is_finite())
 }
 
 fn parse_rgb(s: &str) -> Option<(u8, u8, u8)> {

@@ -63,8 +63,9 @@ holds **no database credentials**; escurel is the only data path.
    errors, principal, manifest), `peacock-theme` (CSS `--pk-*` tokens, host
    ⊕ brand composition), `peacock-core` (render core: resolve · read ·
    compose · guardrails, with an optional wire-trace sink; `chart` wraps the
-   anofox-visualization engine — role specs → SVG → PNG, the derived
-   Vega-Lite — and `dashboard` renders compiled anofox dashboards),
+   anofox-visualization engine — role specs → SVG → PNG, the neutral chart
+   summary (`_meta.chart`), the deprecated derived Vega-Lite — and
+   `dashboard` renders compiled anofox dashboards),
    `peacock-server`
    (surfaces + obs + lifecycle), `peacock-bin` (CLI/settings/manifest/signals,
    `author validate|scaffold|preview|compile`),
@@ -140,7 +141,12 @@ peacock path-depends on two sibling repos under `/home/jr/Projects/datazoo`
   — specified in [`doc/triton-mcp-apps-proxying-issue.md`](doc/triton-mcp-apps-proxying-issue.md)
   — **landed in triton (#143)**, so the Triton-proxied path is now exercised
   end-to-end against the real `triton` binary in
-  `crates/peacock-server/tests/triton_upstream.rs` (no longer `#[ignore]`d).
+  `crates/peacock-server/tests/suite/triton_upstream.rs` (no longer `#[ignore]`d).
+  Triton passes peacock's top-level tool-result `_meta` keys through MCP
+  (triton#375): `png_base64`, `svgs` and the neutral chart summary
+  `_meta.chart` (contract §4b), which Triton prefers over the deprecated
+  `_meta.vega_specs` (one more release) for native charts. Peacock never
+  sets `trace_id` or `triton/*` keys.
   peacock's MCP-App surface is also tested directly against peacock's own real
   `/mcp` endpoint. The `peacock-demo` binary spawns a real `TritonProcess` so
   the demo's "under the hood" inspector can show a genuine captured

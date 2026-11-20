@@ -416,8 +416,12 @@ visualizations).
 - **NFR-P-2** A drill re-render SHOULD reuse warm escurel connections and
   cached report-skill resolution where the principal/tenant is unchanged
   within a session window.
-- **NFR-P-3** Rasterization MUST be bounded; oversized result sets MUST be
-  rejected with a typed `Render` error rather than rendered unboundedly.
+- **NFR-P-3** Rasterization MUST be bounded; an oversized result set MUST be
+  capped at the per-view row limit (`max_rows`, default 10 000) and the cap
+  MUST be surfaced in the artifact (`structuredContent.truncated` and a visible
+  badge), never applied silently. *(Amended by peacock#46: the original text
+  rejected oversized sets with a typed `Render` error, which hid the report,
+  while escurel's own server cap clipped rows without any notice.)*
 
 ### 6.3 Operability (NFR-O)
 

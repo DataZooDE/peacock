@@ -129,6 +129,18 @@ async fn all_surfaces_produce_identical_structured_content() {
         upstream["_meta"]["svgs"],
         "svgs embedded vs upstream"
     );
+    // The neutral chart summary (`_meta.chart`, triton#375) is the same on
+    // every surface that ships it — and the embedded face derives it alike.
+    let chart = peacock_core::chart::primary_chart_summary(&embedded).expect("a summary");
+    assert_eq!(chart, http_body["chart"], "chart embedded vs http");
+    assert_eq!(
+        chart, mcp["result"]["_meta"]["chart"],
+        "chart embedded vs mcp"
+    );
+    assert_eq!(
+        chart, upstream["_meta"]["chart"],
+        "chart embedded vs upstream"
+    );
 
     nw.shutdown().await;
 }

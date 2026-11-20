@@ -62,7 +62,9 @@ The narrative body (shown to authors, searchable).
   a panel, `LINK` / `IMAGE` / download roles, and any authored `rows`,
   `theme`, `plot` or `url` key (peacock injects rows and theme). Allowed
   keys: `roles`, `title`, `width`, `height`, `max_categories`,
-  `max_line_points`. Rows are capped (`max_rows`, default 10k).
+  `max_line_points`. Rows are capped (`max_rows`, default 10k, the same as
+  escurel's server cap); a capped view still renders, and the artifact says
+  so (`structuredContent.truncated`, a "Partial data" badge).
 - **Removed (hard cut):** `kind: vega` views, Vega-Lite specs (`mark`,
   `encoding`, `$schema`) and `geom:` statistical specs fail with an error
   naming the migration. Rewrite each as a `roles:` spec.
@@ -109,10 +111,11 @@ dark client; brand colours are lifted to WCAG AA on the dark card) and
 `locale` (e.g. `de-DE`); an unknown value is a validation error. The
 result's `_meta` carries `svgs` (the painted anofox chart(s), what the
 `ui://peacock` runtime shows — hover for values, click a series to drill),
-`png_base64` (the first chart, for chat cards) and `vega_specs` (a minimal
-Vega-Lite **derived** from bar/line/area/scatter/pie/donut panels, for
-native-chart hosts like Teams and Gemini Enterprise; other charts have
-none). `GET /ui/<report>` serves the runtime standalone.
+`png_base64` (the first chart, for chat cards), `chart` (the neutral
+summary of the first chart that native-chart hosts like Teams and Gemini
+Enterprise draw from — see `03-integration-wiring.md`) and the deprecated
+`vega_specs` (a minimal Vega-Lite derived from bar/line/area/scatter/pie/donut
+panels; one more release). `GET /ui/<report>` serves the runtime standalone.
 
 `structuredContent` carries `rows`, `param_schema`, `current_params`
 (the view state — a consuming agent re-drills by changing params), and

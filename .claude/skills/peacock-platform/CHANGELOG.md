@@ -4,6 +4,21 @@ The skill version tracks the consumer-facing contract; the peacock
 repo's checked-out git ref is the true version pin (see `SKILL.md` →
 "How this skill is installed").
 
+## 0.3.0 — neutral chart summary and row truncation (triton#375, peacock#46)
+
+- `render_report`'s `_meta` gains `chart`: the renderer-neutral summary of
+  the primary chart (Triton upstream contract §4b, `chart` v1) that Triton
+  maps to native charts. `_meta.vega_specs` is **deprecated** and ships for
+  one more release.
+- Through Triton's MCP ingress, peacock's `_meta` keys (`png_base64`,
+  `svgs`, `chart`) now reach the MCP client (Triton passes them through).
+- A view over the row cap is **capped, not refused**. `structuredContent`
+  gains `truncated: { rows_shown, rows_total?, limit, view }` whenever
+  escurel's server cap or peacock's `max_rows` clipped a view; the text
+  content and the `ui://` runtime ("Partial data" badge) say so.
+- Test support: `oversized_fixtures()` / `NW_REPORT_OVERSIZED` — a Northwind
+  report over escurel's row cap.
+
 ## 0.2.0 — anofox-visualization charts (BREAKING, peacock#44)
 
 - Charts are `kind: anofox` views over anofox **role specs**

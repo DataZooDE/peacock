@@ -19,6 +19,7 @@
 
 mod anofox_chart;
 mod anofox_compose;
+mod chart_summary;
 mod compose_unit;
 mod data_northwind;
 mod document_view;
@@ -33,3 +34,4 @@ mod salesperson_leaderboard;
 mod saved_instances;
 mod shared_selection;
 mod supplier_lead_time;
+mod truncation_northwind;

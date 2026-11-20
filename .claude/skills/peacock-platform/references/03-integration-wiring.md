@@ -51,15 +51,39 @@ An agent puts a report **reference** in its surface — never a call:
 ```json
 { "content": [{ "type": "text", "text": "Rendered `<id>` — N rows…" }],
   "structuredContent": { "rows", "param_schema", "current_params",
-                          "instances?", "document?" },
+                          "instances?", "document?", "truncated?" },
   "isError": false,
   "_meta": { "ui": { "resourceUri": "ui://peacock/<id>?…" },
-             "png_base64": "…" } }
+             "png_base64": "…", "svgs": ["<svg…>"],
+             "chart": { "kind": "bar", "x": "month", "y": "Revenue",
+                        "series": "category", "stacked": true,
+                        "orientation": "vertical", "title": "…",
+                        "rows": [ … ] },
+             "vega_specs": [ … ] } }
 ```
 
-Through Triton's MCP ingress this nests once more:
-`result.structuredContent.result.{structuredContent,_meta}`. A drill is
-a fresh `tools/call render_report` with the new ABSOLUTE params.
+- `_meta.chart` — the renderer-neutral summary of the **primary** (first)
+  chart, Triton's upstream contract §4b (`chart` v1, triton#375). Triton maps
+  it to a channel's native chart (Teams `Chart.*`, Gemini Enterprise
+  `VegaChart`). Derived from the anofox role spec: `XAXIS` → `x`, the value
+  role → `kind` + `y`, `CATEGORY` → `series` (pie/donut: `x`), `TITLE` /
+  `XTITLE` / `YTITLE` / `YFORMAT` (or `CURRENCY_CODE`) → `title` / `x_title` /
+  `y_title` / `unit`, `FLIP` → `orientation: horizontal`, `BARCHART_STACKED`
+  with a series → `stacked: true`. At most 200 rows; points with a null or
+  non-numeric `y` are dropped. Absent when no chart fits (heatmap, histogram,
+  a second measure, …) — Triton then shows the PNG.
+- `_meta.vega_specs` — **deprecated** (triton#375): Triton reads it only when
+  `chart` is absent or invalid. Emitted for one more release, then removed.
+- `structuredContent.truncated` — `{ rows_shown, rows_total?, limit, view }`
+  when a row cap clipped a view (escurel's server cap, 10 000, which reports
+  no total; or peacock's own `max_rows`). The text content says so too, and
+  the `ui://` runtime shows a "Partial data" badge. Absent otherwise.
+- Peacock never sets `trace_id`, a `triton/*` key or an MCP-reserved key in
+  `_meta`. Through Triton's MCP ingress, peacock's top-level `_meta` keys
+  pass through beside Triton's own `trace_id` and `ui` (4 MiB budget), so an
+  MCP client behind Triton sees the same `png_base64` / `svgs` / `chart`.
+
+A drill is a fresh `tools/call render_report` with the new ABSOLUTE params.
 
 ## The iframe host verbs
 
