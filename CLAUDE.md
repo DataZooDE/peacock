@@ -142,9 +142,10 @@ peacock path-depends on two sibling repos under `/home/jr/Projects/datazoo`
   — **landed in triton (#143)**, so the Triton-proxied path is now exercised
   end-to-end against the real `triton` binary in
   `crates/peacock-server/tests/suite/triton_upstream.rs` (no longer `#[ignore]`d).
-  Triton passes peacock's top-level tool-result `_meta` keys through MCP
-  (triton#375): `png_base64`, `svgs` and the neutral chart summary
-  `_meta.chart` (contract §4b), which Triton prefers over the deprecated
+  Triton passes peacock's tool-result `_meta` through MCP by an allow-list
+  (triton#375/#383): `ui` to every client; `png_base64`, `svgs` and the
+  neutral chart summary `_meta.chart` (contract §4b) to card hosts (MCP Apps
+  clients) only. Triton prefers `_meta.chart` over the deprecated
   `_meta.vega_specs` (one more release) for native charts. Peacock never
   sets `trace_id` or `triton/*` keys.
   peacock's MCP-App surface is also tested directly against peacock's own real
