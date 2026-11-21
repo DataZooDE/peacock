@@ -15,7 +15,6 @@ use clap::{Parser, Subcommand};
 use peacock_core::EscurelData;
 use peacock_server::{AppState, router};
 use peacock_types::Principal;
-use tokio::signal::unix::{SignalKind, signal};
 
 use crate::author::AuthorCmd;
 use crate::manifest::Manifest;
@@ -172,11 +171,27 @@ async fn run(s: Settings) -> Result<(), String> {
         .map_err(|e| format!("serve: {e}"))
 }
 
+/// Wait for the drain signal: SIGTERM (the orchestrator) or SIGINT on Unix;
+/// Ctrl-C / Ctrl-Break on Windows, which has no SIGTERM — the release ships a
+/// Windows binary, so the Unix-only signal API must not be compiled there.
+#[cfg(unix)]
 async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
     let mut term = signal(SignalKind::terminate()).expect("install SIGTERM handler");
     let mut intr = signal(SignalKind::interrupt()).expect("install SIGINT handler");
     tokio::select! {
         _ = term.recv() => tracing::info!("SIGTERM — draining"),
         _ = intr.recv() => tracing::info!("SIGINT — draining"),
+    }
+}
+
+#[cfg(windows)]
+async fn shutdown_signal() {
+    use tokio::signal::windows::{ctrl_break, ctrl_c};
+    let mut c = ctrl_c().expect("install Ctrl-C handler");
+    let mut b = ctrl_break().expect("install Ctrl-Break handler");
+    tokio::select! {
+        _ = c.recv() => tracing::info!("Ctrl-C — draining"),
+        _ = b.recv() => tracing::info!("Ctrl-Break — draining"),
     }
 }
