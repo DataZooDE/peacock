@@ -3,8 +3,9 @@
 //! `TritonProcess` (the real triton binary) + `peacock-server` + escurel.
 //!
 //! Exercises Triton's MCP-Apps proxying (issue #143): `tools/call render_report`
-//! is dispatched to peacock and its `_meta` (the `ui.resourceUri`, the PNG, the
-//! SVGs and the `chart` summary, triton#375) is surfaced; a
+//! is dispatched to peacock and its `_meta` is surfaced: the `ui.resourceUri` to
+//! every client, the PNG, the SVGs and the `chart` summary to card hosts
+//! (triton#375/#383); a
 //! `resources/read ui://peacock/<report>` is proxied to peacock and returns the
 //! iframe runtime.
 //!
@@ -66,6 +67,32 @@ async fn triton_mcp(
         .expect("json")
 }
 
+/// Open an MCP session as a card host: a client that declares the MCP Apps
+/// extension in `initialize` (triton#383 sends chart data to these only).
+async fn card_host_session(triton: &TritonProcess, http: &reqwest::Client) -> String {
+    let resp = http
+        .post(triton.mcp_url("/"))
+        .header("accept", "application/json, text/event-stream")
+        .bearer_auth("dev-token")
+        .json(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": { "extensions": { "io.modelcontextprotocol/ui": {
+                    "mimeTypes": ["text/html;profile=mcp-app"] } } },
+                "clientInfo": { "name": "peacock-test", "version": "1" }
+            }}),
+        )
+        .send()
+        .await
+        .expect("initialize");
+    resp.headers()
+        .get("mcp-session-id")
+        .expect("an MCP session")
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn triton_proxies_render_report_and_the_ui_resource() {
     let (nw, peacock) = start_peacock().await;
@@ -102,15 +129,36 @@ async fn triton_proxies_render_report_and_the_ui_resource() {
         format!("ui://peacock/{NW_REPORT}"),
         "Triton surfaced peacock's ui:// link: {res}"
     );
-    // triton#375: Triton's MCP surface passes peacock's own top-level `_meta`
-    // keys through (beside its own `trace_id` and `ui`), so an MCP client
-    // behind Triton gets what it gets from peacock directly: the anofox PNG,
-    // the painted SVG and the neutral chart summary.
-    let meta = &res["_meta"];
+    // triton#375/#383: upstream `_meta` passes Triton's MCP surface by an
+    // allow-list with audiences. A plain MCP client gets `ui` but no chart
+    // data; a card host (a client that declared MCP Apps) gets the anofox
+    // PNG, the painted SVG and the neutral chart summary as well.
+    let plain = &res["_meta"];
     assert!(
-        meta["trace_id"].is_string(),
-        "Triton's own trace id: {meta}"
+        plain["trace_id"].is_string(),
+        "Triton's own trace id: {plain}"
     );
+    for k in ["png_base64", "svgs", "chart", "vega_specs"] {
+        assert!(
+            plain.get(k).is_none(),
+            "`{k}` is for card hosts only: {plain}"
+        );
+    }
+    let session = card_host_session(&triton, &http).await;
+    let card_call: Value = http
+        .post(triton.mcp_url("/"))
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-session-id", &session)
+        .bearer_auth("dev-token")
+        .json(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+            "params": { "name": "render_report", "arguments": { "report_id": NW_REPORT } } }))
+        .send()
+        .await
+        .expect("card-host tools/call")
+        .json()
+        .await
+        .expect("json");
+    let meta = &card_call["result"]["_meta"];
     let png = meta["png_base64"].as_str().expect("png through Triton MCP");
     assert!(png.starts_with("iVBORw0KGgo"), "a base64 PNG");
     assert!(

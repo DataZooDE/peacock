@@ -10,8 +10,9 @@ repo's checked-out git ref is the true version pin (see `SKILL.md` →
   the primary chart (Triton upstream contract §4b, `chart` v1) that Triton
   maps to native charts. `_meta.vega_specs` is **deprecated** and ships for
   one more release.
-- Through Triton's MCP ingress, peacock's `_meta` keys (`png_base64`,
-  `svgs`, `chart`) now reach the MCP client (Triton passes them through).
+- Through Triton's MCP ingress, peacock's chart keys (`png_base64`, `svgs`,
+  `chart`, `vega_specs`) now reach card hosts (MCP Apps clients); `ui`
+  reaches every client (triton#375, allow-list per triton#383).
 - A view over the row cap is **capped, not refused**. `structuredContent`
   gains `truncated: { rows_shown, rows_total?, limit, view }` whenever
   escurel's server cap or peacock's `max_rows` clipped a view; the text

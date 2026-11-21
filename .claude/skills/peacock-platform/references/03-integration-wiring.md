@@ -79,9 +79,11 @@ An agent puts a report **reference** in its surface — never a call:
   no total; or peacock's own `max_rows`). The text content says so too, and
   the `ui://` runtime shows a "Partial data" badge. Absent otherwise.
 - Peacock never sets `trace_id`, a `triton/*` key or an MCP-reserved key in
-  `_meta`. Through Triton's MCP ingress, peacock's top-level `_meta` keys
-  pass through beside Triton's own `trace_id` and `ui` (4 MiB budget), so an
-  MCP client behind Triton sees the same `png_base64` / `svgs` / `chart`.
+  `_meta`. Through Triton's MCP ingress, peacock's `_meta` passes by an
+  allow-list with audiences (triton#383): `ui` reaches every client;
+  `chart`, `png_base64`, `svgs` and `vega_specs` reach **card hosts** only
+  (clients that declared the MCP Apps extension). An operator can widen or
+  drop a key per tool in Triton's `adapter.yaml` (`tools.render_report.meta`).
 
 A drill is a fresh `tools/call render_report` with the new ABSOLUTE params.
 
