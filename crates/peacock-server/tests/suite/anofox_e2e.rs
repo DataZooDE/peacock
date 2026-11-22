@@ -95,7 +95,7 @@ async fn mcp_host_renders_northwind_with_anofox() {
     );
 
     // The chart itself: anofox SVG for the iframe, a PNG for the card, and the
-    // derived Vega-Lite for native-chart hosts.
+    // neutral summary for native-chart hosts (no Vega-Lite since triton#382).
     let svg = res["_meta"]["svgs"][0]
         .as_str()
         .expect("the painted chart SVG");
@@ -104,7 +104,8 @@ async fn mcp_host_renders_northwind_with_anofox() {
     }
     let light_png = png_of(&res);
     assert_eq!(&light_png[..8], b"\x89PNG\r\n\x1a\n");
-    assert_eq!(res["_meta"]["vega_specs"][0]["mark"]["type"], "bar");
+    assert_eq!(res["_meta"]["chart"]["kind"], "bar");
+    assert!(res["_meta"].get("vega_specs").is_none());
 
     // A dark client in Germany.
     let dark = render_report(
@@ -137,7 +138,7 @@ async fn mcp_host_renders_northwind_with_anofox() {
         drilled["structuredContent"]["current_params"]["category"],
         "Beverages"
     );
-    assert_eq!(drilled["_meta"]["vega_specs"][0]["mark"]["type"], "line");
+    assert_eq!(drilled["_meta"]["chart"]["kind"], "line");
     let dsvg = drilled["_meta"]["svgs"][0].as_str().unwrap();
     assert!(dsvg.contains("Beverages") && !dsvg.contains("Seafood"));
 

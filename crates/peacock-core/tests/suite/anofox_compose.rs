@@ -105,15 +105,16 @@ fn every_chart_is_kept_not_only_the_first() {
 }
 
 #[test]
-fn chartable_panels_also_carry_derived_vega_for_triton() {
+fn chartable_panels_also_carry_a_chart_summary_for_triton() {
     let art = run(
         &skill(vec![chart("rev_bar", None), chart("rev_hist", None)]),
         rows(),
     );
-    // The bar derives; the histogram has no minimal Vega-Lite form.
-    assert_eq!(art.vega_specs.len(), 1);
-    assert_eq!(art.vega_specs[0]["mark"]["type"], "bar");
-    assert_eq!(art.vega_specs[0]["encoding"]["color"]["field"], "category");
+    // The bar has a neutral summary; the histogram has no summary form.
+    let bar = peacock_core::chart::chart_summary(&art.anofox_specs[0]).expect("bar summary");
+    assert_eq!(bar["kind"], "bar");
+    assert_eq!(bar["series"], "category");
+    assert!(peacock_core::chart::chart_summary(&art.anofox_specs[1]).is_none());
 }
 
 #[test]

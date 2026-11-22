@@ -35,13 +35,13 @@ async fn renders_the_northwind_report_as_one_artifact() {
     assert_eq!(kpi["value"].as_f64().unwrap(), 2986.0);
 
     // The chart carries the escurel rows INLINE — 16 groups — and its
-    // painted SVG; the derived Vega-Lite rides alongside for Triton.
+    // painted SVG; the neutral chart summary rides alongside for Triton.
     let chart = comps.iter().find(|c| c["kind"] == "anofox").unwrap();
     assert_eq!(chart["spec"]["rows"].as_array().unwrap().len(), 16);
     let svg = chart["svg"].as_str().expect("the chart is painted");
     assert!(svg.contains("Beverages") && svg.contains("Revenue by category"));
     assert_eq!(
-        art.vega_specs[0]["data"]["values"]
+        peacock_core::chart::primary_chart_summary(&art).expect("summary")["rows"]
             .as_array()
             .unwrap()
             .len(),

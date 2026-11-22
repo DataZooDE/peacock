@@ -431,19 +431,16 @@ fn rasterize(svg: &str, scale: f32, background: Option<&str>) -> Result<Vec<u8>>
         .map_err(|e| Error::render(format!("png encode: {e}")))
 }
 
-// ── derived Vega-Lite (compatibility output, deprecated) ────────────────────
+// ── derived Vega-Lite (Mosaic mode) ─────────────────────────────────────────
 
-/// **Deprecated** (triton#375): Triton now reads the neutral
-/// [`chart_summary`] (`_meta.chart`) first; `vega_specs` ships for one more
-/// release, then goes. Mosaic mode keeps using this derivation internally.
-///
-/// A minimal Vega-Lite spec derived from a panel, for consumers that read
-/// Vega-Lite natively: Triton's Teams `Chart.VerticalBar` mapping, Gemini
-/// Enterprise's `VegaChart`, and Mosaic mode. Only bar / line / area /
+/// A minimal Vega-Lite spec derived from a panel, for Mosaic mode (the
+/// client's vgplot draws it over an escurel data source). Native-chart hosts
+/// get the neutral [`chart_summary`] instead; the `vega_specs` output that
+/// once carried this spec was removed with triton#382. Only bar / line / area /
 /// scatter / pie / donut panels derive (`XAXIS` + optional `CATEGORY` /
 /// `SIZE` + one value role);
-/// everything else is `None` and those surfaces show the PNG. Field names are
-/// the roles' display names, so the native chart's labels read like the PNG.
+/// everything else is `None`. Field names are the roles' display names, so
+/// the chart's labels read like the PNG.
 pub fn derive_vega_lite(panel: &Value) -> Option<Value> {
     let roles = panel.get("roles")?.as_array()?;
     let mut x: Option<(usize, String)> = None;

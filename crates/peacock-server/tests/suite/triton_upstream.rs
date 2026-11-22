@@ -177,9 +177,11 @@ async fn triton_proxies_render_report_and_the_ui_resource() {
     assert_eq!(chart["series"], "category");
     assert_eq!(chart["stacked"], true);
     assert_eq!(chart["rows"].as_array().unwrap().len(), 16);
+    // triton#382: peacock no longer sends the deprecated Vega-Lite.
+    assert!(meta.get("vega_specs").is_none(), "{meta}");
 
-    // The deprecated derived Vega-Lite still rides the tool-dispatch result
-    // (REST shows it whole) for one more release.
+    // The tool-dispatch result (REST shows it whole) carries the same summary
+    // and no Vega-Lite either.
     let rest: Value = http
         .post(triton.rest_url("/v1/tools/render_report"))
         .bearer_auth("dev-token")
@@ -195,9 +197,7 @@ async fn triton_proxies_render_report_and_the_ui_resource() {
         rmeta["chart"], *chart,
         "REST and MCP carry the same summary"
     );
-    let vega = &rmeta["vega_specs"][0];
-    assert_eq!(vega["mark"]["type"], "bar", "derived Vega-Lite: {vega}");
-    assert_eq!(vega["data"]["values"].as_array().unwrap().len(), 16);
+    assert!(rmeta.get("vega_specs").is_none(), "{rmeta}");
 
     // 2. resources/read ui://peacock/<report> → Triton proxies to peacock,
     //    which returns the iframe runtime HTML (#143 B).
@@ -492,7 +492,7 @@ async fn teams_message_gets_native_chart_from_anofox_report() {
     assert_eq!(chart["type"], "Chart.VerticalBar.Grouped", "{chart}");
     assert_eq!(chart["title"], "Revenue by category");
     // `stacked` exists only in the neutral summary (`_meta.chart`), so this
-    // proves Triton built the native chart from it, not from `vega_specs`.
+    // proves Triton built the native chart from it.
     assert_eq!(chart["stacked"], true, "{chart}");
     let legends: Vec<&str> = chart["data"]
         .as_array()

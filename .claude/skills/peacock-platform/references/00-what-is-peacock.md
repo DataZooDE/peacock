@@ -15,7 +15,7 @@ frontend / chat ──► TRITON (gateway: protocol adapters + auth)
 ```
 
 - **One render core.** `render(report_id, params, principal, escurel)`
-  → an `Artifact { a2ui, anofox_specs, vega_specs (derived, deprecated), structured_content, png? }`. Every
+  → an `Artifact { a2ui, anofox_specs, structured_content, png? }`. Every
   surface funnels through it; a drill is a fresh render from the
   **absolute** param vector (no server-side UI state).
 - **Four surfaces**: MCP App (`tools/call render_report` +

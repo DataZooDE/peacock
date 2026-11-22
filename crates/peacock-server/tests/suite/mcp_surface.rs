@@ -137,8 +137,8 @@ async fn tools_call_carries_the_neutral_chart_summary() {
     let rows = chart["rows"].as_array().unwrap();
     assert_eq!(rows.len(), 16);
     assert!(rows.iter().all(|r| r["Revenue"].is_f64()));
-    // The deprecated Vega-Lite still rides for one more release.
-    assert_eq!(meta["vega_specs"][0]["mark"]["type"], "bar");
+    // The deprecated Vega-Lite is gone (triton#382): the summary replaces it.
+    assert!(meta.get("vega_specs").is_none(), "{meta}");
     assert_no_protected_meta_keys(meta);
     nw.shutdown().await;
 }

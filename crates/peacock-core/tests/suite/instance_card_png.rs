@@ -83,7 +83,7 @@ async fn body_tags_report_renders_the_same_card_png_as_views() {
     // The body-tags report has an empty `views:`; before the fix its card would
     // be a bare title (no facts/body). Now it derives the same views inline, so
     // the rasterized card is byte-identical to the `views:` report's card.
-    assert!(bt_card.vega_specs.is_empty());
+    assert!(bt_card.anofox_specs.is_empty());
     let png = bt_card.png.as_ref().expect("body-tags instance-card png");
     assert!(
         png.len() > 1000,
@@ -151,7 +151,7 @@ async fn instance_report_renders_a_card_png() {
     .expect("render");
 
     // No chart in this report — the PNG is the instance CARD.
-    assert!(art.vega_specs.is_empty());
+    assert!(art.anofox_specs.is_empty());
     let png = art.png.as_ref().expect("an instance-card png");
     assert!(png.len() > 1000, "a real PNG, got {} bytes", png.len());
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "PNG magic");

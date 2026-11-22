@@ -5,11 +5,9 @@
 //! - `a2ui` — the A2UI v0.9 layout document (KPI/table/text/controls);
 //! - `anofox_specs` — the anofox panel specs (rows inline) the layout's
 //!   `kind: anofox` components embed (kept separable from layout, FR-V-1);
-//! - `vega_specs` — minimal Vega-Lite DERIVED from the chartable panels, a
-//!   compatibility output for native-chart consumers (Triton's Teams/GE).
-//!   **Deprecated** (triton#375): surfaces now ship the renderer-neutral
-//!   chart summary `_meta.chart` (`peacock_core::chart::chart_summary`);
-//!   `vega_specs` is emitted for one more release, then removed;
+//!   (Native-chart hosts get the renderer-neutral chart summary
+//!   `_meta.chart`, `peacock_core::chart::chart_summary`, derived from these;
+//!   the derived Vega-Lite `vega_specs` was removed with triton#382.)
 //! - `structured_content` — typed rows + the parameter schema **and the
 //!   current resolved parameter values** (the view state, FR-X-1);
 //! - `png` / `pngs` — on-demand chart rasterizations (chat path, FR-V-2).
@@ -67,11 +65,6 @@ pub struct Truncation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Artifact {
     pub a2ui: Value,
-    /// Derived Vega-Lite (compatibility output) for the chartable panels —
-    /// bar / line / area / pie / donut. Other chart kinds have none.
-    /// Deprecated in favour of the `_meta.chart` summary (triton#375); kept
-    /// for one more release.
-    pub vega_specs: Vec<Value>,
     /// The anofox panel specs (`{rows, roles, …}`), one per chart, in layout
     /// order. The painted SVG rides on each `kind: anofox` component.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

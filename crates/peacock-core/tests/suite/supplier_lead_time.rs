@@ -31,10 +31,10 @@ async fn supplier_lead_time_distribution_renders_in_brand() {
         .expect("the lead-time distribution renders end-to-end");
 
     // The composed artifact carries the anofox panel: the density over all 36
-    // deliveries plus the SLA reference line. A density has no minimal
-    // Vega-Lite form, so no derived spec (Triton shows the PNG).
+    // deliveries plus the SLA reference line. A density has no chart-summary
+    // form, so no summary (Triton shows the PNG).
     assert_eq!(art.anofox_specs.len(), 1);
-    assert!(art.vega_specs.is_empty());
+    assert!(peacock_core::chart::primary_chart_summary(&art).is_none());
     let spec = &art.anofox_specs[0];
     assert_eq!(spec["roles"][0][1], "DENSITY");
     assert_eq!(spec["roles"][1][1], "XLINE");

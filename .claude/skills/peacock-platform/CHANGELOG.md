@@ -4,6 +4,13 @@ The skill version tracks the consumer-facing contract; the peacock
 repo's checked-out git ref is the true version pin (see `SKILL.md` →
 "How this skill is installed").
 
+## 0.4.0 — `_meta.vega_specs` removed (triton#382)
+
+- `render_report` no longer sends the derived Vega-Lite (`_meta.vega_specs`
+  on MCP, `vega_specs` in the HTTP render response), and `Artifact` loses
+  its `vega_specs` field. Native-chart hosts use `_meta.chart`; Triton no
+  longer reads `vega_specs` either. Mosaic mode keeps its own derived spec.
+
 ## 0.3.0 — neutral chart summary and row truncation (triton#375, peacock#46)
 
 - `render_report`'s `_meta` gains `chart`: the renderer-neutral summary of

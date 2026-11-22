@@ -279,17 +279,10 @@ Overview.
         assert!(svg.as_str().unwrap().contains(title), "{title}");
     }
     assert_eq!(body["anofox_specs"].as_array().unwrap().len(), 3);
-    let marks: Vec<&str> = body["vega_specs"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v["mark"]["type"].as_str().unwrap())
-        .collect();
-    assert_eq!(
-        marks,
-        vec!["bar", "arc"],
-        "bar + donut derive; the heatmap does not"
-    );
+    // The primary chart's neutral summary; the deprecated Vega-Lite is gone
+    // (triton#382).
+    assert_eq!(body["chart"]["kind"], "bar", "{}", body["chart"]);
+    assert!(body.get("vega_specs").is_none(), "vega_specs: {body}");
     assert!(body["png_base64"].as_str().is_some_and(|p| p.len() > 1000));
 
     nw.shutdown().await;
