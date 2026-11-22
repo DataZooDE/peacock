@@ -58,8 +58,7 @@ An agent puts a report **reference** in its surface — never a call:
              "chart": { "kind": "bar", "x": "month", "y": "Revenue",
                         "series": "category", "stacked": true,
                         "orientation": "vertical", "title": "…",
-                        "rows": [ … ] },
-             "vega_specs": [ … ] } }
+                        "rows": [ … ] } } }
 ```
 
 - `_meta.chart` — the renderer-neutral summary of the **primary** (first)
@@ -72,8 +71,8 @@ An agent puts a report **reference** in its surface — never a call:
   with a series → `stacked: true`. At most 200 rows; points with a null or
   non-numeric `y` are dropped. Absent when no chart fits (heatmap, histogram,
   a second measure, …) — Triton then shows the PNG.
-- `_meta.vega_specs` — **deprecated** (triton#375): Triton reads it only when
-  `chart` is absent or invalid. Emitted for one more release, then removed.
+- `_meta.vega_specs` — **removed** (triton#382). Neither peacock nor Triton
+  uses it any more.
 - `structuredContent.truncated` — `{ rows_shown, rows_total?, limit, view }`
   when a row cap clipped a view (escurel's server cap, 10 000, which reports
   no total; or peacock's own `max_rows`). The text content says so too, and
@@ -81,7 +80,7 @@ An agent puts a report **reference** in its surface — never a call:
 - Peacock never sets `trace_id`, a `triton/*` key or an MCP-reserved key in
   `_meta`. Through Triton's MCP ingress, peacock's `_meta` passes by an
   allow-list with audiences (triton#383): `ui` reaches every client;
-  `chart`, `png_base64`, `svgs` and `vega_specs` reach **card hosts** only
+  `chart`, `png_base64` and `svgs` reach **card hosts** only
   (clients that declared the MCP Apps extension). An operator can widen or
   drop a key per tool in Triton's `adapter.yaml` (`tools.render_report.meta`).
 

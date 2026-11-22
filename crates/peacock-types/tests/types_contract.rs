@@ -141,7 +141,6 @@ fn artifact_carries_a2ui_charts_structured_and_optional_png() {
             { "kind": "anofox", "spec": panel, "svg": "<svg/>" },
             { "kind": "table", "rows": [] }
         ] }),
-        vega_specs: vec![json!({ "mark": { "type": "line" } })],
         anofox_specs: vec![panel],
         structured_content: sc,
         png: None,
@@ -149,7 +148,8 @@ fn artifact_carries_a2ui_charts_structured_and_optional_png() {
     };
     let v = serde_json::to_value(&art).unwrap();
     assert_eq!(v["a2ui"]["version"], "0.9");
-    assert_eq!(v["vega_specs"][0]["mark"]["type"], "line");
+    // The derived Vega-Lite is gone (triton#382).
+    assert!(v.get("vega_specs").is_none());
     assert_eq!(v["anofox_specs"][0]["roles"][1][1], "LINECHART");
     // Per-chart PNGs never ride the serialized artifact.
     assert!(v.get("pngs").is_none());

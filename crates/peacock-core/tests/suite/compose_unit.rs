@@ -121,14 +121,14 @@ fn composes_a2ui_v09_with_kpi_chart_inline_and_table() {
     assert_eq!(kpi["value"].as_f64().unwrap(), 371.0);
 
     // The chart component carries the anofox panel with rows injected INLINE
-    // (FR-V-3); the spec is also exposed separately (FR-V-1), plus the
-    // derived Vega-Lite compatibility spec.
+    // (FR-V-3); the spec is also exposed separately (FR-V-1), and the
+    // neutral chart summary derives from it.
     let chart = &comps[1];
     assert_eq!(chart["kind"], "anofox");
     assert_eq!(chart["spec"]["rows"].as_array().unwrap().len(), 3);
     assert_eq!(art.anofox_specs.len(), 1);
-    assert_eq!(art.vega_specs.len(), 1);
-    assert_eq!(art.vega_specs[0]["mark"]["type"], "line");
+    let summary = peacock_core::chart::primary_chart_summary(&art).expect("summary");
+    assert_eq!(summary["kind"], "line");
 
     // structuredContent carries rows + schema + current params (FR-X-1).
     assert_eq!(art.structured_content.rows.as_array().unwrap().len(), 3);

@@ -1,8 +1,8 @@
 //! The composer: `(report skill, absolute params, rows) → Artifact`, one pure
 //! pass (FR-R-2, FR-R-3, FR-V-1/3). Builds the A2UI v0.9 layout (KPI / chart /
 //! table / text), the `kind: anofox` components carrying anofox panel specs
-//! with the escurel rows injected **inline** (FR-V-3), the derived Vega-Lite
-//! compatibility specs, and the `structuredContent` (rows + param schema +
+//! with the escurel rows injected **inline** (FR-V-3), and the
+//! `structuredContent` (rows + param schema +
 //! current resolved params, FR-X-1). Guardrails (FR-V-4) and the row cap
 //! (NFR-P-3, surfaced as `structuredContent.truncated`, #46) run here.
 //! Painting (SVG/PNG) is the render step's job.
@@ -99,7 +99,6 @@ pub fn compose(
     let mut any_mosaic = false;
 
     let mut components: Vec<Value> = Vec::new();
-    let mut vega_specs: Vec<Value> = Vec::new();
     let mut anofox_specs: Vec<Value> = Vec::new();
 
     // Two layouts. When the body carries inline `{{tags}}` (the "markdown +
@@ -137,7 +136,6 @@ pub fn compose(
                             pages,
                             bound,
                             mosaic_threshold,
-                            &mut vega_specs,
                             &mut anofox_specs,
                             &mut any_mosaic,
                         )?);
@@ -154,7 +152,6 @@ pub fn compose(
                 pages,
                 bound,
                 mosaic_threshold,
-                &mut vega_specs,
                 &mut anofox_specs,
                 &mut any_mosaic,
             )?);
@@ -184,7 +181,6 @@ pub fn compose(
 
     Ok(Artifact {
         a2ui,
-        vega_specs,
         anofox_specs,
         structured_content,
         png: None,
@@ -204,7 +200,6 @@ fn render_view(
     pages: &BTreeMap<String, InstancePage>,
     bound: &Value,
     mosaic_threshold: Option<usize>,
-    vega_specs: &mut Vec<Value>,
     anofox_specs: &mut Vec<Value>,
     any_mosaic: &mut bool,
 ) -> Result<Value> {
@@ -238,13 +233,12 @@ fn render_view(
             })?;
             // Guardrail + column cross-check, rows re-keyed for anofox.
             let panel = crate::chart::panel_spec(authored, rs)?;
-            let derived = crate::chart::derive_vega_lite(&panel);
 
             if mosaic_threshold.is_some_and(|t| n > t) {
                 // Mosaic mode streams from escurel: the client draws a
                 // vgplot spec — the DERIVED Vega-Lite, with its inline rows
                 // stripped — over an escurel-owned data-source reference.
-                let mut chart = derived.ok_or_else(|| {
+                let mut chart = crate::chart::derive_vega_lite(&panel).ok_or_else(|| {
                     Error::render(format!(
                         "spec `{chosen}`: Mosaic mode needs a bar / line / area / pie chart"
                     ))
@@ -266,9 +260,6 @@ fn render_view(
                     "artifact": { "spec": chart, "source": source, "row_count": n },
                 }))
             } else {
-                if let Some(v) = derived {
-                    vega_specs.push(v);
-                }
                 anofox_specs.push(panel.clone());
                 Ok(json!({ "kind": "anofox", "spec": panel }))
             }

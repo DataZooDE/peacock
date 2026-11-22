@@ -113,9 +113,8 @@ result's `_meta` carries `svgs` (the painted anofox chart(s), what the
 `ui://peacock` runtime shows — hover for values, click a series to drill),
 `png_base64` (the first chart, for chat cards), `chart` (the neutral
 summary of the first chart that native-chart hosts like Teams and Gemini
-Enterprise draw from — see `03-integration-wiring.md`) and the deprecated
-`vega_specs` (a minimal Vega-Lite derived from bar/line/area/scatter/pie/donut
-panels; one more release). `GET /ui/<report>` serves the runtime standalone.
+Enterprise draw from — see `03-integration-wiring.md`). `GET /ui/<report>`
+serves the runtime standalone.
 
 `structuredContent` carries `rows`, `param_schema`, `current_params`
 (the view state — a consuming agent re-drills by changing params), and

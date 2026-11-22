@@ -232,10 +232,6 @@ pub fn tool_result(report_id: &str, caller_params: &Value, art: &Artifact) -> Va
     let mut meta = json!({
         "ui": ui_meta(report_id, caller_params, widget_csp_origin().as_deref()),
         "png_base64": png_b64,
-        // DEPRECATED (triton#375) — the minimal Vega-Lite derived from the
-        // chartable panels, read by Triton only when `chart` is absent or
-        // invalid. Emitted for one more release, then removed.
-        "vega_specs": art.vega_specs,
         // The painted anofox SVG of every chart, in layout order — what
         // the ui:// iframe shows.
         "svgs": art.chart_svgs(),

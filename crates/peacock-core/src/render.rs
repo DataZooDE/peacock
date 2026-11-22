@@ -225,7 +225,6 @@ async fn render_dashboard_report<E: ReportData>(
     }
     Ok(Artifact {
         a2ui: json!({ "version": "0.9", "components": components }),
-        vega_specs: Vec::new(),
         anofox_specs: Vec::new(),
         structured_content: peacock_types::StructuredContent {
             rows: painted.primary_rows,

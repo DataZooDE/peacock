@@ -320,7 +320,7 @@ fn print_summary(report_id: &str, artifact: &peacock_types::Artifact) {
         .unwrap_or(0);
     println!("  rows: {row_count}");
 
-    println!("  vega specs: {}", artifact.vega_specs.len());
+    println!("  charts: {}", artifact.anofox_specs.len());
     println!(
         "  chart rasterized: {}",
         if artifact.png.is_some() { "yes" } else { "no" }

@@ -422,7 +422,8 @@ See `BRD.md` §2. Additional terms used here:
   artifact`; the peacock analogue of Triton's dispatcher.
 - **Surface shell** — a thin adapter (MCP-App, chat, structured,
   embedded) over the render core; carries no composition logic.
-- **Artifact** — `{a2ui_v0.9, vega_specs, structuredContent, png?}`
+- **Artifact** — `{a2ui_v0.9, anofox_specs, structuredContent, png?}`
+  (the derived `vega_specs` was removed with triton#382)
   produced by one render.
 - **Structured data view** — escurel-owned virtualized `sql_view`
   instance peacock reads via `query_instance` (escurel HLD §5).

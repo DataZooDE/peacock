@@ -234,8 +234,6 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
                 "structuredContent": art.structured_content,
                 // The neutral chart summary (`_meta.chart` on MCP, triton#375).
                 "chart": peacock_core::chart::primary_chart_summary(&art),
-                // Deprecated (triton#375): one more release.
-                "vega_specs": art.vega_specs,
                 "anofox_specs": art.anofox_specs,
                 "svgs": art.chart_svgs(),
                 "png_base64": png_b64,
@@ -318,11 +316,8 @@ fn pipeline_trace(
                 .collect()
         })
         .unwrap_or_default();
-    let vega = art.vega_specs.first().cloned().unwrap_or(Value::Null);
-    let mark = vega
-        .get("mark")
-        .and_then(|m| m.as_str().or_else(|| m.get("type").and_then(Value::as_str)))
-        .unwrap_or("—");
+    let chart = peacock_core::chart::primary_chart_summary(art).unwrap_or(Value::Null);
+    let chart_kind = chart.get("kind").and_then(Value::as_str).unwrap_or("—");
 
     let pretty = |v: &Value| serde_json::to_string_pretty(v).unwrap_or_default();
 
@@ -424,10 +419,10 @@ fn pipeline_trace(
             "detail": "inline-data-only · no remote data.url · no expr/signal — an agent-authored spec can't fetch or compute beyond its rows ✓"
         },
         {
-            "n": 10, "actor": "peacock", "kind": "vega", "title": format!("Vega-Lite spec · mark “{mark}”"),
+            "n": 10, "actor": "peacock", "kind": "chart", "title": format!("Chart summary · kind “{chart_kind}”"),
             "protocol": "in-proc", "wire": "peacock render core (in-process Rust)",
-            "detail": "the named chart spec with the rows injected inline",
-            "code": serde_json::to_string_pretty(&vega).unwrap_or_default()
+            "detail": "the primary chart as Triton's neutral `_meta.chart` summary (rows inline)",
+            "code": serde_json::to_string_pretty(&chart).unwrap_or_default()
         },
         {
             "n": 11, "actor": "peacock", "kind": "theme", "title": format!("Theme · {brand} ⊕ {host}"),
