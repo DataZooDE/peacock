@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use axum::{Json, extract::State, response::IntoResponse};
-use peacock_core::{RenderOpts, render};
+use peacock_core::{RenderOpts, Surface, render};
 use peacock_types::{Artifact, Error};
 use serde_json::{Value, json};
 
@@ -137,22 +137,29 @@ async fn tools_call(state: &AppState, host: &str, params: &Value) -> Result<Valu
     if name != "render_report" {
         return Err(Error::validation(format!("unknown tool `{name}`")));
     }
+    let audit = state.audit_scope(Surface::Mcp, host);
+    let report_params = args.get("params").cloned().unwrap_or(json!({}));
+    // A refused request is a failed render: it gets its audit line too.
+    let refuse = |report_id: Option<&str>, e: Error| {
+        peacock_core::audit::emit_refused(&audit, &state.principal, report_id, &report_params, &e);
+        e
+    };
     let report_id = args
         .get("report_id")
         .and_then(Value::as_str)
-        .ok_or_else(|| Error::validation("arguments.report_id is required"))?;
-    let report_params = args.get("params").cloned().unwrap_or(json!({}));
+        .ok_or_else(|| refuse(None, Error::validation("arguments.report_id is required")))?;
 
     // Apply styling on THIS endpoint too (not just the HTTP demo path): the
     // rasterized chart / instance card carries the resolved corporate
     // identity ⊕ host look. Unknown names resolve to the stock palette.
     let theme = state.themes.resolve(&state.principal.tenant, host);
-    let (variant, locale) = look_args(&args)?;
+    let (variant, locale) = look_args(&args).map_err(|e| refuse(Some(report_id), e))?;
     let opts = RenderOpts {
         png_scale: Some(state.png_scale),
         theme: Some(theme.tokens),
         variant,
         locale,
+        audit: Some(audit.clone()),
         ..Default::default()
     };
     let art = render(
@@ -483,6 +490,7 @@ pub(crate) async fn render_document_page(
     let opts = RenderOpts {
         png_scale: Some(state.png_scale),
         theme: Some(theme.tokens.clone()),
+        audit: Some(state.audit_scope(Surface::DocumentPage, host)),
         ..Default::default()
     };
     let art = render(

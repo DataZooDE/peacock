@@ -64,7 +64,9 @@ The narrative body (shown to authors, searchable).
   keys: `roles`, `title`, `width`, `height`, `max_categories`,
   `max_line_points`. Rows are capped (`max_rows`, default 10k, the same as
   escurel's server cap); a capped view still renders, and the artifact says
-  so (`structuredContent.truncated`, a "Partial data" badge).
+  so (`structuredContent.truncated`, a "Partial data" badge, and the capped
+  view's chart title gains "(Partial data: first N rows…)", which is what a
+  Teams / Google Chat card shows).
 - **Removed (hard cut):** `kind: vega` views, Vega-Lite specs (`mark`,
   `encoding`, `$schema`) and `geom:` statistical specs fail with an error
   naming the migration. Rewrite each as a `roles:` spec.

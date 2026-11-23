@@ -75,8 +75,14 @@ An agent puts a report **reference** in its surface — never a call:
   uses it any more.
 - `structuredContent.truncated` — `{ rows_shown, rows_total?, limit, view }`
   when a row cap clipped a view (escurel's server cap, 10 000, which reports
-  no total; or peacock's own `max_rows`). The text content says so too, and
-  the `ui://` runtime shows a "Partial data" badge. Absent otherwise.
+  no total; or peacock's own `max_rows`). The text content says so too, the
+  `ui://` runtime shows a "Partial data" badge, and the capped view's chart
+  title (in the painted SVG/PNG and in `_meta.chart.title`) gains
+  `(Partial data: first N of M rows)` / `(Partial data: first N rows; more
+  exist)`. The title is the only render text a Triton chat card shows: for
+  an inline `report` component Triton builds the card from the agent's own
+  surface plus `_meta.chart` (or the PNG), never from peacock's text content.
+  Absent otherwise.
 - Peacock never sets `trace_id`, a `triton/*` key or an MCP-reserved key in
   `_meta`. Through Triton's MCP ingress, peacock's `_meta` passes by an
   allow-list with audiences (triton#383): `ui` reaches every client;
@@ -85,6 +91,29 @@ An agent puts a report **reference** in its surface — never a call:
   drop a key per tool in Triton's `adapter.yaml` (`tools.render_report.meta`).
 
 A drill is a fresh `tools/call render_report` with the new ABSOLUTE params.
+
+## The audit line (one per render, stdout)
+
+Every render writes exactly one JSON line with `kind: "audit"` to stdout
+(FR-O-4), beside the `tracing` JSON log, on every surface — `mcp`
+(`/mcp` `tools/call`), `http` (`/v1/render_report`), `triton` (`POST /`
+upstream), `document_page`, and `embedded` (a library caller of
+`peacock_core::render`; set `RenderOpts::audit` to `None` to opt out, as
+the author CLI preview does). Failed and refused renders are audited too.
+
+```json
+{"kind":"audit","event":"render","when":"2026-11-23T05:12:09.481Z",
+ "surface":"mcp","tenant":"acme","who":"analyst-1",
+ "report_id":"northwind-line-combinations","param_names":[],"result":"ok",
+ "duration_ms":912,"rows":10000,
+ "truncated":{"rows_shown":10000,"limit":10000,"view":"lines"}}
+```
+
+- `result`: `ok` or `error:<auth|validation|data|render>`.
+- Optional: `host` (only a registered theme flavor), `trace_id`, `report_id`
+  (absent if the request named none), `rows` (ok only), `truncated`.
+- Never: rows, cell values, param VALUES (names only), error messages,
+  tokens. The substrate collector ships the line; peacock ships nothing.
 
 ## The iframe host verbs
 

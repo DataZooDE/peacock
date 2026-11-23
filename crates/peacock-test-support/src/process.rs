@@ -5,12 +5,33 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// A running `peacock` binary bound to a loopback port.
 pub struct PeacockProcess {
     child: Child,
     addr: std::net::SocketAddr,
+    /// Every line the child wrote to stdout so far (its JSON log and audit
+    /// lines). A reader thread drains the pipe continuously, so a chatty
+    /// child never blocks on a full pipe buffer.
+    stdout: Arc<Mutex<Vec<String>>>,
+}
+
+/// Drain the child's stdout into `sink`, one entry per line, until EOF.
+fn drain_stdout(child: &mut Child, sink: Arc<Mutex<Vec<String>>>) {
+    let Some(out) = child.stdout.take() else {
+        return;
+    };
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        for line in std::io::BufReader::new(out).lines() {
+            let Ok(line) = line else { break };
+            if let Ok(mut v) = sink.lock() {
+                v.push(line);
+            }
+        }
+    });
 }
 
 fn binary_path() -> PathBuf {
@@ -107,6 +128,8 @@ impl PeacockProcess {
             cmd.env(k, v);
         }
         let mut child = cmd.spawn().expect("spawn peacock");
+        let stdout: Arc<Mutex<Vec<String>>> = Arc::default();
+        drain_stdout(&mut child, stdout.clone());
 
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -122,7 +145,11 @@ impl PeacockProcess {
             if std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok()
                 && reqwest_ok(&format!("http://{addr}/healthz")).await
             {
-                return Ok(Self { child, addr });
+                return Ok(Self {
+                    child,
+                    addr,
+                    stdout,
+                });
             }
             if Instant::now() > deadline {
                 let _ = child.kill();
@@ -151,6 +178,38 @@ impl PeacockProcess {
     /// The base URL (`http://127.0.0.1:<port>`).
     pub fn base_url(&self) -> String {
         format!("http://{}", self.addr)
+    }
+
+    /// The lines the child has written to stdout so far, in order.
+    pub fn stdout_lines(&self) -> Vec<String> {
+        self.stdout.lock().map(|v| v.clone()).unwrap_or_default()
+    }
+
+    /// The child's `kind: "audit"` stdout lines so far, parsed (FR-O-4).
+    pub fn audit_lines(&self) -> Vec<serde_json::Value> {
+        self.stdout_lines()
+            .iter()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter(|v| v["kind"] == "audit")
+            .collect()
+    }
+
+    /// Wait (up to `timeout`) until at least `n` audit lines have arrived;
+    /// returns all of them. A line is written before its response is sent,
+    /// but the reader thread may not have picked it up yet.
+    pub async fn wait_for_audit_lines(
+        &self,
+        n: usize,
+        timeout: Duration,
+    ) -> Vec<serde_json::Value> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let lines = self.audit_lines();
+            if lines.len() >= n || Instant::now() > deadline {
+                return lines;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     /// Send SIGTERM and wait for graceful exit; returns the exit status

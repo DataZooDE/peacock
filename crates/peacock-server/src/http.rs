@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use base64::Engine;
-use peacock_core::{EscurelData, RenderOpts, render};
+use peacock_core::{AuditScope, EscurelData, RenderOpts, Surface, render};
 use peacock_types::{Error, Principal};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -47,6 +47,16 @@ pub struct AppState {
     /// from Triton (headers + body), captured by the upstream handler so the
     /// render path can surface it in the inspector's Triton step.
     pub upstream_capture: std::sync::Arc<std::sync::Mutex<Option<Value>>>,
+}
+
+impl AppState {
+    /// The audit scope for a render on `surface` themed for `host`. The host
+    /// is recorded only when it names a registered flavor, so a raw header
+    /// value never reaches the audit line.
+    pub(crate) fn audit_scope(&self, surface: Surface, host: &str) -> AuditScope {
+        let known = self.themes.hosts().any(|h| h == host);
+        AuditScope::new(surface).with_host(known.then(|| host.to_owned()))
+    }
 }
 
 /// Build the peacock HTTP router.
@@ -185,10 +195,25 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
     // Capture the genuine escurel wire payloads this render issues, so the
     // inspector shows real traffic rather than a reconstruction.
     let sink: peacock_core::TraceSink = Default::default();
+    let audit = state.audit_scope(Surface::Http, host);
+    let params = if req.params.is_null() {
+        json!({})
+    } else {
+        req.params
+    };
     let (variant, locale) =
         match peacock_core::chart::parse_look_args(req.variant.as_deref(), req.locale.as_deref()) {
             Ok(look) => look,
-            Err(e) => return error_response(&e),
+            Err(e) => {
+                peacock_core::audit::emit_refused(
+                    &audit,
+                    &state.principal,
+                    Some(&req.report_id),
+                    &params,
+                    &e,
+                );
+                return error_response(&e);
+            }
         };
     let opts = RenderOpts {
         png_scale: req.png.then_some(state.png_scale),
@@ -196,12 +221,8 @@ async fn render_report(State(state): State<Arc<AppState>>, Json(req): Json<Rende
         variant,
         locale,
         trace: Some(sink.clone()),
+        audit: Some(audit),
         ..Default::default()
-    };
-    let params = if req.params.is_null() {
-        json!({})
-    } else {
-        req.params
     };
 
     match render(

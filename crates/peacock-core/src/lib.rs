@@ -12,6 +12,7 @@
 //! - `author` — the authoring tooling (validate / scaffold) that reuses the
 //!   parser and guardrail so an author is checked against the renderer's rules.
 
+pub mod audit;
 pub mod author;
 pub mod body_tags;
 pub mod chart;
@@ -24,6 +25,7 @@ pub mod render;
 pub mod saved;
 pub mod skill;
 
+pub use audit::{AuditScope, Surface};
 pub use author::{
     AuthorError, parse_skill_markdown, scaffold, split_frontmatter, validate_skill_markdown,
 };

@@ -19,6 +19,7 @@
 
 mod anofox_chart;
 mod anofox_compose;
+mod audit_line;
 mod chart_summary;
 mod compose_unit;
 mod data_northwind;
