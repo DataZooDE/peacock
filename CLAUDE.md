@@ -53,8 +53,9 @@ holds **no database credentials**; escurel is the only data path.
    reproducible from `(report, params)` and from the audit log (ADR-P7).
 
 6. **12-factor + substrate alignment.** Config via `PEACOCK_*` env (over
-   CLI/defaults); JSON logs + one audit line per render to stdout (never
-   rows/tokens/PII); `/healthz`, `/version` (binary + image + bundle SHA),
+   CLI/defaults); JSON logs + one `kind: "audit"` line per render to stdout,
+   written by the render core itself, failures included (never
+   rows/tokens/param values/PII — param names only); `/healthz`, `/version` (binary + image + bundle SHA),
    tailnet-only `/metrics`; graceful SIGTERM drain; secrets are Vault refs
    in production (boot refuses literals).
 

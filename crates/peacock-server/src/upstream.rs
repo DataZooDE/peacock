@@ -193,6 +193,13 @@ async fn render_document_html(
             .filter(|s| !s.is_empty())
     };
     let (Some(skill), Some(id)) = (field("skill"), field("id")) else {
+        peacock_core::audit::emit_refused(
+            &state.audit_scope(peacock_core::Surface::DocumentPage, host),
+            principal,
+            Some(peacock_core::DOCUMENT_REPORT_ID),
+            &args,
+            &peacock_types::Error::validation("arguments.skill and arguments.id are required"),
+        );
         return (
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "arguments.skill and arguments.id are required" })),
@@ -271,9 +278,18 @@ async fn render_report_tool(
     host: &str,
     args: Value,
 ) -> Response {
+    let audit = state.audit_scope(peacock_core::Surface::Triton, host);
+    let report_params = args.get("params").cloned().unwrap_or(json!({}));
     let report_id = match args.get("report_id").and_then(Value::as_str) {
         Some(r) => r.to_owned(),
         None => {
+            peacock_core::audit::emit_refused(
+                &audit,
+                principal,
+                None,
+                &report_params,
+                &peacock_types::Error::validation("report_id is required"),
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({ "error": "report_id is required" })),
@@ -281,13 +297,19 @@ async fn render_report_tool(
                 .into_response();
         }
     };
-    let report_params = args.get("params").cloned().unwrap_or(json!({}));
     // Apply styling on the Triton-dispatched path too: the PNG (chart or
     // instance card) carries the resolved corporate identity ⊕ host look.
     let theme = state.themes.resolve(&principal.tenant, host);
     let (variant, locale) = match crate::mcp::look_args(&args) {
         Ok(look) => look,
         Err(e) => {
+            peacock_core::audit::emit_refused(
+                &audit,
+                principal,
+                Some(&report_id),
+                &report_params,
+                &e,
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(json!({ "error": e.kind(), "message": e.to_string() })),
@@ -300,6 +322,7 @@ async fn render_report_tool(
         theme: Some(theme.tokens),
         variant,
         locale,
+        audit: Some(audit),
         ..Default::default()
     };
     match render(&report_id, &report_params, principal, &state.escurel, &opts).await {

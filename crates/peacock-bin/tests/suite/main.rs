@@ -16,5 +16,6 @@
 //! `tests/suite.rs`. A test target's root file resolves `mod x;` against
 //! its *own* directory, so `tests/suite.rs` would look for `tests/x.rs`.
 
+mod audit;
 mod author;
 mod lifecycle;

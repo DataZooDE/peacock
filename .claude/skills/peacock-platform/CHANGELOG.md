@@ -4,6 +4,22 @@ The skill version tracks the consumer-facing contract; the peacock
 repo's checked-out git ref is the true version pin (see `SKILL.md` →
 "How this skill is installed").
 
+## 0.5.0 — render audit line, truncation on chat cards (peacock#46)
+
+- Every render writes one `kind: "audit"` JSON line to stdout (FR-O-4) on
+  every surface, failures included: report id, surface, host flavor,
+  tenant/subject, param NAMES, `result`, `duration_ms`, `rows` and
+  `truncated`. Never rows, values or tokens. See
+  `references/03-integration-wiring.md` → "The audit line".
+- `RenderOpts` gains `audit: Option<AuditScope>` (default: an `embedded`
+  render). An embedding app therefore gets audit lines on ITS stdout; pass
+  `audit: None` to opt out.
+- A capped view's chart title gains "(Partial data: first N rows…)", so the
+  cut shows on Teams native charts (`_meta.chart.title`) and on every PNG
+  (Google Chat, Teams fallback image).
+- Test support: `PeacockProcess::stdout_lines()` / `audit_lines()` /
+  `wait_for_audit_lines()`; the child's stdout is drained continuously.
+
 ## 0.4.0 — `_meta.vega_specs` removed (triton#382)
 
 - `render_report` no longer sends the derived Vega-Lite (`_meta.vega_specs`

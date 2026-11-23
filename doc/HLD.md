@@ -338,6 +338,17 @@ Two stdout channels by JSON `kind`: `log` (diagnostic) and `audit` (one
 line per render). Substrate collector ships audit lines. Rows, tokens,
 and PII never appear in either. (Triton §8.2.)
 
+As built (#46): the `tracing` log lines carry no `kind` field; audit lines
+carry `kind: "audit"`, `event: "render"`, `when`, `surface`, `host?`,
+`tenant`, `who`, `trace_id?`, `report_id?`, `param_names`, `result`
+(`ok` | `error:<kind>`), `duration_ms`, `rows?`, `truncated?`. The line is
+written by `peacock_core::render` itself (the single pivot), so each render
+writes exactly one; surfaces write one for a request they refuse before
+reaching it. Param VALUES are not recorded — only names — so FR-O-4's
+`params_hash` is deliberately left out (an unkeyed hash of low-entropy
+values is reversible); a render is reproduced from the report id + the
+caller's params, not from the audit line alone.
+
 ### 8.5 Statelessness & re-render
 No persistence; no server-side UI session. Drill = fresh render from
 parameters. Renders reproducible from the audit log. (Triton ADR-5.)

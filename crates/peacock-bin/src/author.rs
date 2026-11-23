@@ -259,8 +259,11 @@ async fn preview(
     // funnels through (FR-R-1). Rasterize the first chart so the author sees
     // whether it renders to PNG.
     let escurel_data = EscurelData::new(escurel.to_owned());
+    // A terminal preview, not a render surface: no audit line on stdout
+    // (it would interleave with the summary printed below).
     let opts = RenderOpts {
         png_scale: Some(2.0),
+        audit: None,
         ..Default::default()
     };
     let artifact = match render(&skill.id, &param_vec, &principal, &escurel_data, &opts).await {

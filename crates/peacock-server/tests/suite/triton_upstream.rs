@@ -18,13 +18,20 @@ use std::time::Duration;
 
 use peacock_core::EscurelData;
 use peacock_server::{AppState, serve};
-use peacock_test_support::{NW_REPORT, NorthwindEscurel};
+use peacock_test_support::{
+    NW_REPORT, NW_REPORT_OVERSIZED, NorthwindEscurel, NorthwindOpts, oversized_fixtures,
+};
 use serde_json::{Value, json};
 use triton_tests::TritonProcess;
 
 /// Start a real escurel + a real peacock upstream; return (escurel, peacock host:port).
 async fn start_peacock() -> (NorthwindEscurel, std::net::SocketAddr) {
-    let nw = NorthwindEscurel::spawn().await;
+    start_peacock_with(NorthwindOpts::default()).await
+}
+
+/// [`start_peacock`] over a Northwind seed with extra fixtures.
+async fn start_peacock_with(opts: NorthwindOpts) -> (NorthwindEscurel, std::net::SocketAddr) {
+    let nw = NorthwindEscurel::spawn_with(opts).await;
     let state = Arc::new(AppState {
         escurel: EscurelData::new(nw.endpoint()),
         principal: nw.sales_principal(),
@@ -395,24 +402,38 @@ fn teams_claims(fake: &triton_tests::chat_courier_fixture::FakeBotFramework) -> 
     })
 }
 
-/// Alice types into Teams; her agent answers with the Northwind report.
-/// Triton dispatches `render_report` to the REAL peacock (real escurel, real
-/// Parquet), maps peacock's chart summary (`_meta.chart`) to a native `Chart.*` element, and
-/// serves peacock's anofox PNG as the chart's fallback image. Microsoft's
-/// side is triton-tests' `FakeBotFramework` (a real HTTP server for the
-/// third-party Bot Connector); the agent is a `FakeAgent` — neither is the
-/// boundary under test.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn teams_message_gets_native_chart_from_anofox_report() {
+/// One Teams round trip: the card Teams received, Triton's chat-webhook
+/// address (for the img route), and the processes that must outlive the
+/// assertions (dropping them stops Triton and the fakes).
+struct TeamsReply {
+    card: Value,
+    webhook: std::net::SocketAddr,
+    _keep: (
+        triton_tests::chat_courier_fixture::FakeBotFramework,
+        triton_tests::upstream_fixture::FakeAgent,
+        TritonProcess,
+    ),
+}
+
+/// Alice asks in Teams; her agent answers with `report_id` inline. Triton
+/// dispatches `render_report` to the real peacock at `peacock` and posts an
+/// Adaptive Card to the `FakeBotFramework`. Microsoft's side is
+/// triton-tests' `FakeBotFramework` (a real HTTP server for the third-party
+/// Bot Connector); the agent is a `FakeAgent` — neither is the boundary
+/// under test.
+async fn teams_card_for_report(
+    peacock: std::net::SocketAddr,
+    report_id: &str,
+    what: &str,
+) -> TeamsReply {
     use triton_tests::chat_courier_fixture::FakeBotFramework;
     use triton_tests::upstream_fixture::FakeAgent;
 
-    let (nw, peacock) = start_peacock().await;
     let fake = FakeBotFramework::start().await;
     let assistant = FakeAgent::start_returning(json!({
         "surface": { "components": [
-            { "kind": "text", "value": "Here is revenue by category for 1997." },
-            { "kind": "report", "report_id": NW_REPORT, "args": { "params": {} } }
+            { "kind": "text", "value": format!("Here is {what}.") },
+            { "kind": "report", "report_id": report_id, "args": { "params": {} } }
         ] }
     }))
     .await;
@@ -466,8 +487,7 @@ async fn teams_message_gets_native_chart_from_anofox_report() {
         .expect("POST inbound activity");
     assert!(resp.status().is_success(), "{}", resp.status());
 
-    // The reply Teams receives: an Adaptive Card with a NATIVE grouped bar
-    // chart (one series per category) built from peacock's derived spec.
+    // The reply Teams receives: an Adaptive Card.
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     let card = loop {
         if let Some(a) = fake
@@ -484,6 +504,26 @@ async fn teams_message_gets_native_chart_from_anofox_report() {
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
+    TeamsReply {
+        card,
+        webhook,
+        _keep: (fake, assistant, triton),
+    }
+}
+
+/// Alice types into Teams; her agent answers with the Northwind report:
+/// an Adaptive Card with a NATIVE grouped bar chart (one series per category).
+/// Triton dispatches `render_report` to the REAL peacock (real escurel, real
+/// Parquet), maps peacock's chart summary (`_meta.chart`) to a native `Chart.*` element, and
+/// serves peacock's anofox PNG as the chart's fallback image.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn teams_message_gets_native_chart_from_anofox_report() {
+    let (nw, peacock) = start_peacock().await;
+    let TeamsReply {
+        card,
+        webhook,
+        _keep,
+    } = teams_card_for_report(peacock, NW_REPORT, "revenue by category").await;
     let body = card["body"].as_array().expect("card body");
     let chart = body
         .iter()
@@ -525,6 +565,39 @@ async fn teams_message_gets_native_chart_from_anofox_report() {
     let bytes = img.bytes().await.unwrap();
     assert_eq!(&bytes[..4], b"\x89PNG");
     assert!(bytes.len() > 5_000, "a real chart, not a placeholder");
+
+    nw.shutdown().await;
+}
+
+/// #46: a report whose view was capped says so ON the Teams card, not only in
+/// `structuredContent` (which a chat card never shows). The oversized
+/// Northwind view is clipped by escurel's 10 000-row cap; the card Triton
+/// builds from peacock's render must carry the partial-data sentence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn teams_card_says_when_report_rows_were_truncated() {
+    let (extra_skills, extra_instances) = oversized_fixtures();
+    let (nw, peacock) = start_peacock_with(NorthwindOpts {
+        extra_skills,
+        extra_instances,
+        ..Default::default()
+    })
+    .await;
+    let TeamsReply { card, _keep, .. } =
+        teams_card_for_report(peacock, NW_REPORT_OVERSIZED, "every line combination").await;
+
+    let shown = serde_json::to_string(&card["body"]).unwrap();
+    assert!(
+        shown.contains("Partial data: first 10000 rows"),
+        "the card must say the rows were truncated; got: {card}"
+    );
+    // The chart is still drawn natively (from the capped summary).
+    let chart = card["body"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"].as_str().is_some_and(|t| t.starts_with("Chart.")))
+        .unwrap_or_else(|| panic!("expected a native Chart.* element; got: {card}"));
+    assert_eq!(chart["type"], "Chart.Line", "{chart}");
 
     nw.shutdown().await;
 }

@@ -56,6 +56,12 @@ pub struct RenderOpts {
     /// oversized rows. This is below `max_rows` (the hard render cap): a view
     /// over `max_rows` and without a mosaic threshold is capped (NFR-P-3, #46).
     pub mosaic_threshold: Option<usize>,
+    /// The audit line this render writes to stdout (FR-O-4): `Some(scope)`
+    /// writes exactly one `kind: "audit"` line when the render finishes,
+    /// failed or not; `None` writes none (the author CLI's preview, which is
+    /// a terminal tool, not a render surface). Defaults to an embedded
+    /// render, so a library caller is audited without opting in.
+    pub audit: Option<crate::audit::AuditScope>,
 }
 
 impl Default for RenderOpts {
@@ -69,6 +75,7 @@ impl Default for RenderOpts {
             trace: None,
             selection: None,
             mosaic_threshold: None,
+            audit: Some(crate::audit::AuditScope::default()),
         }
     }
 }
@@ -81,7 +88,38 @@ pub const DOCUMENT_REPORT_ID: &str = "document";
 /// Render `(report_id, params)` for `principal` against an escurel binding.
 /// `escurel` supplies both the report-skill resolution and the row reads, so
 /// the embedded face and the service share this exact path (FR-R-1, FR-E-1).
+///
+/// Writes the render's one audit line ([`RenderOpts::audit`]) when it
+/// finishes, whatever the outcome — this is the single place it is written,
+/// so every surface gets exactly one line per render.
 pub async fn render<E>(
+    report_id: &str,
+    params: &Value,
+    principal: &Principal,
+    escurel: &E,
+    opts: &RenderOpts,
+) -> Result<Artifact>
+where
+    E: ReportData + ReportSkills + InstanceData,
+{
+    let started = std::time::Instant::now();
+    let out = render_unaudited(report_id, params, principal, escurel, opts).await;
+    if let Some(scope) = &opts.audit {
+        crate::audit::emit(&crate::audit::AuditLine::new(
+            scope,
+            principal,
+            Some(report_id),
+            params,
+            out.as_ref(),
+            started.elapsed(),
+        ));
+    }
+    out
+}
+
+/// [`render`] without the audit line: the nested render a document's
+/// `viewer:` delegates to is part of the outer render, not a second one.
+async fn render_unaudited<E>(
     report_id: &str,
     params: &Value,
     principal: &Principal,
@@ -334,7 +372,7 @@ where
     // so this recursion is one level deep by construction.
     if let Some(viewer) = &skill_page.viewer {
         let viewer_params = json!({ viewer.param.clone(): doc_id });
-        let mut artifact = Box::pin(render(
+        let mut artifact = Box::pin(render_unaudited(
             &viewer.report,
             &viewer_params,
             principal,

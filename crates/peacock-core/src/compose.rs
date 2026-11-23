@@ -136,6 +136,7 @@ pub fn compose(
                             pages,
                             bound,
                             mosaic_threshold,
+                            &truncations,
                             &mut anofox_specs,
                             &mut any_mosaic,
                         )?);
@@ -152,6 +153,7 @@ pub fn compose(
                 pages,
                 bound,
                 mosaic_threshold,
+                &truncations,
                 &mut anofox_specs,
                 &mut any_mosaic,
             )?);
@@ -188,6 +190,29 @@ pub fn compose(
     })
 }
 
+/// The sentence a capped view's chart carries (#46).
+pub fn partial_data_note(t: &Truncation) -> String {
+    match t.rows_total {
+        Some(total) => format!("Partial data: first {} of {total} rows", t.rows_shown),
+        None => format!("Partial data: first {} rows; more exist", t.rows_shown),
+    }
+}
+
+/// `spec` with [`partial_data_note`] appended to its title (or as its title
+/// when it has none).
+fn stamp_partial_title(spec: &Value, t: &Truncation) -> Value {
+    let note = partial_data_note(t);
+    let mut out = spec.clone();
+    let title = match spec.get("title").and_then(Value::as_str).map(str::trim) {
+        Some(title) if !title.is_empty() => format!("{title} ({note})"),
+        _ => note,
+    };
+    if let Value::Object(m) = &mut out {
+        m.insert("title".to_owned(), Value::String(title));
+    }
+    out
+}
+
 /// Render ONE view into its A2UI component, pushing any chart spec onto the
 /// tracking vectors and flagging Mosaic mode. Shared by the classic `views:`
 /// loop and the inline-tag body layout, so both produce byte-identical
@@ -200,6 +225,7 @@ fn render_view(
     pages: &BTreeMap<String, InstancePage>,
     bound: &Value,
     mosaic_threshold: Option<usize>,
+    truncations: &BTreeMap<&str, Truncation>,
     anofox_specs: &mut Vec<Value>,
     any_mosaic: &mut bool,
 ) -> Result<Value> {
@@ -231,6 +257,18 @@ fn render_view(
             let authored = skill.specs.get(chosen).ok_or_else(|| {
                 Error::render(format!("chart view names unknown spec `{chosen}`"))
             })?;
+            // A capped view says so in its chart TITLE (#46): the title is
+            // the one piece of text that reaches every chart surface — the
+            // painted SVG/PNG (Google Chat, a Teams image fallback) and the
+            // neutral `_meta.chart` summary Teams draws its native chart from.
+            let stamped;
+            let authored = match truncations.get(data.as_str()) {
+                Some(t) => {
+                    stamped = stamp_partial_title(authored, t);
+                    &stamped
+                }
+                None => authored,
+            };
             // Guardrail + column cross-check, rows re-keyed for anofox.
             let panel = crate::chart::panel_spec(authored, rs)?;
 
